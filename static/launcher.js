@@ -5,28 +5,12 @@
 (() => {
   const $ = (id) => document.getElementById(id);
 
-  // Common llama-server flags offered in the "Add flag" dropdown. Names only —
-  // values are free text. The list isn't exhaustive; anything can be typed.
-  const COMMON_FLAGS = [
-    ["-c", "context size (n_ctx)"],
-    ["-ngl", "GPU layers (n-gpu-layers)"],
-    ["-fa", "flash attention (on/off)"],
-    ["--parallel", "parallel slots"],
-    ["-a", "model alias"],
-    ["-ts", "tensor split (e.g. 3,1)"],
-    ["-t", "CPU threads"],
-    ["-b", "batch size"],
-    ["-ub", "micro-batch size"],
-    ["-np", "n parallel"],
-    ["--no-mmap", "disable mmap (no value)"],
-    ["--mlock", "lock model in RAM (no value)"],
-    ["--spec-type", "speculative type (e.g. draft-mtp)"],
-    ["-md", "draft model path"],
-    ["--cache-type-k", "KV cache type, keys"],
-    ["--cache-type-v", "KV cache type, values"],
-    ["--host", "bind address"],
-    ["--rope-scaling", "RoPE scaling type"],
-  ];
+  // Flags supported by the installed llama-server, fetched from the backend
+  // (parsed from `llama-server --help`, or a bundled fallback). FLAG_INDEX maps
+  // every alias -> {desc, value_hint} so a custom-typed known flag still shows
+  // its description. FLAG_LIST is the alphabetised dropdown order.
+  let FLAG_LIST = [];                 // [{flags, value_hint, desc}], sorted
+  const FLAG_INDEX = Object.create(null);
 
   // Loaded = the saved config currently mirrored in the form (the clean
   // baseline for dirty detection), or null for a fresh / unsaved form.
@@ -101,17 +85,33 @@
   }
 
   // --- flags editor ------------------------------------------------------ //
+  function flagInfo(flag) {
+    return FLAG_INDEX[(flag || "").trim()] || null;
+  }
   function addFlagRow(flag = "", value = "") {
     const row = document.createElement("div");
     row.className = "lx-flag-row";
     row.innerHTML =
       `<input class="lx-flag" type="text" placeholder="flag" />` +
-      `<input class="lx-val" type="text" placeholder="value (optional)" />` +
+      `<input class="lx-val" type="text" placeholder="value" />` +
+      `<span class="lx-flag-desc"></span>` +
       `<button class="x" title="remove">×</button>`;
-    row.querySelector(".lx-flag").value = flag;
-    row.querySelector(".lx-val").value = value;
+    const flagEl = row.querySelector(".lx-flag");
+    const valEl = row.querySelector(".lx-val");
+    const descEl = row.querySelector(".lx-flag-desc");
+    // Show the known-flag description after the value, and use its value hint as
+    // the placeholder — both update live as the flag field is typed/changed.
+    const sync = () => {
+      const info = flagInfo(flagEl.value);
+      descEl.textContent = info ? info.desc : "";
+      valEl.placeholder = info && info.value_hint ? info.value_hint : "value";
+    };
+    flagEl.value = flag;
+    valEl.value = value;
+    flagEl.addEventListener("input", sync);
     row.querySelector(".x").addEventListener("click", () => row.remove());
     $("lx-flags").appendChild(row);
+    sync();
   }
   function renderFlags(flags) {
     $("lx-flags").innerHTML = "";
@@ -400,21 +400,103 @@
   }
 
   // --- flag picker ------------------------------------------------------- //
-  function initFlagPicker() {
+  function renderFlagPicker() {
     const sel = $("lx-flag-pick");
+    sel.innerHTML = "";
     const custom = document.createElement("option");
     custom.value = ""; custom.textContent = "— custom flag —";
     sel.appendChild(custom);
-    COMMON_FLAGS.forEach(([flag, desc]) => {
+    FLAG_LIST.forEach((f) => {
       const o = document.createElement("option");
-      o.value = flag; o.textContent = `${flag} — ${desc}`;
+      o.value = f.flags[0];
+      const hint = f.value_hint ? " " + f.value_hint : "";
+      // Truncate the dropdown label; the full description still shows in the row.
+      const short = f.desc && f.desc.length > 90 ? f.desc.slice(0, 89) + "…" : f.desc;
+      const desc = short ? " — " + short : "";
+      o.textContent = `${f.flags.join(", ")}${hint}${desc}`;
       sel.appendChild(o);
     });
   }
 
+  // Sort key: the long flag (--…) if present, else the first alias, stripped of
+  // leading dashes so "-c"/"--ctx-size" sort under "ctx-size".
+  function flagSortKey(f) {
+    return (f.flags.find((x) => x.startsWith("--")) || f.flags[0] || "")
+      .replace(/^-+/, "").toLowerCase();
+  }
+
+  async function loadFlags() {
+    let data;
+    try { data = await getJSON("/api/launcher/flags"); }
+    catch (e) { data = { flags: [] }; }
+    const list = (data && data.flags) || [];
+
+    for (const k in FLAG_INDEX) delete FLAG_INDEX[k];
+    list.forEach((f) => {
+      (f.flags || []).forEach((alias) => {
+        FLAG_INDEX[alias] = { desc: f.desc || "", value_hint: f.value_hint || null };
+      });
+    });
+    FLAG_LIST = list.filter((f) => f.flags && f.flags.length)
+                    .sort((a, b) => flagSortKey(a).localeCompare(flagSortKey(b)));
+    renderFlagPicker();
+
+    // Backfill descriptions on rows rendered before the flags arrived.
+    $("lx-flags").querySelectorAll(".lx-flag").forEach((el) =>
+      el.dispatchEvent(new Event("input")));
+  }
+
+  // --- console viewer ---------------------------------------------------- //
+  let consoleTimer = null;
+  let consoleOffset = 0;
+  let consoleStick = true;        // keep pinned to the bottom while tailing
+  let consoleHasContent = false;
+  const ANSI = /\x1b\[[0-9;]*m/g;  // llama-server colourises its log; strip it
+
+  function openConsole() {
+    const out = $("console-out");
+    out.textContent = "";
+    consoleOffset = 0;
+    consoleStick = true;
+    consoleHasContent = false;
+    $("console-modal").hidden = false;
+    out.onscroll = () => {
+      consoleStick = out.scrollHeight - out.scrollTop - out.clientHeight < 24;
+    };
+    pollConsole();
+    consoleTimer = setInterval(pollConsole, 1000);
+  }
+  function closeConsole() {
+    $("console-modal").hidden = true;
+    if (consoleTimer) { clearInterval(consoleTimer); consoleTimer = null; }
+  }
+  async function pollConsole() {
+    let data;
+    try { data = await getJSON(`/api/launcher/console?offset=${consoleOffset}`); }
+    catch (e) { return; }
+    const out = $("console-out");
+    $("console-path").textContent = data.path || "";
+    if (data.content) {
+      const text = data.content.replace(ANSI, "");
+      // A backwards jump in offset means the log rotated/truncated -> replace.
+      if (!consoleHasContent || data.offset < consoleOffset) out.textContent = text;
+      else out.textContent += text;
+      consoleHasContent = true;
+      consoleOffset = data.offset;
+      if (consoleStick) out.scrollTop = out.scrollHeight;
+    } else {
+      if (data.offset != null) consoleOffset = data.offset;
+      if (!consoleHasContent) {
+        out.textContent = data.available
+          ? "(log is empty)"
+          : "(no log yet — launch a server from the panel)";
+      }
+    }
+  }
+
   // --- wire up ----------------------------------------------------------- //
   function init() {
-    initFlagPicker();
+    loadFlags();
 
     $("lx-head").addEventListener("click", (e) => {
       if (e.target.id === "lx-config" || e.target.closest("select")) return;
@@ -432,11 +514,27 @@
     $("lx-launch").addEventListener("click", doLaunch);
     $("lx-stop").addEventListener("click", doStop);
     $("lx-restart").addEventListener("click", doRestart);
+    $("lx-console").addEventListener("click", openConsole);
     $("lx-save").addEventListener("click", doSave);
     $("lx-saveas").addEventListener("click", doSaveAsNew);
     $("lx-delete").addEventListener("click", doDelete);
     $("lx-modal").addEventListener("click", (e) => {
       if (e.target.id === "lx-modal") closeModal();   // click backdrop to dismiss
+    });
+    $("console-close").addEventListener("click", closeConsole);
+    $("console-modal").addEventListener("click", (e) => {
+      if (e.target.id === "console-modal") closeConsole();
+    });
+
+    // Warn before closing/reloading while a dashboard-launched server is running.
+    // The server is intentionally left running either way — this is just a guard
+    // against losing the dashboard by accident.
+    window.addEventListener("beforeunload", (e) => {
+      const st = LX.state && LX.state.status;
+      if (st && st.state === "running") {
+        e.preventDefault();
+        e.returnValue = "";   // required for the native confirmation to show
+      }
     });
 
     refresh().then(() => fillForm(null));

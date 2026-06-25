@@ -25,11 +25,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+import flags as flags_mod
 import store
 from collectors import (
     GpuCollector,
     LlamaCollector,
     LogTailer,
+    collect_sysmem,
     find_llama_pids,
     parse_device_baseline,
     parse_device_split,
@@ -193,6 +195,7 @@ def build_app(args) -> FastAPI:
         data = collect_gated(lite)
         gpu_data = gpu.collect(llama_pids)
         data["gpu"] = gpu_data
+        data["sysmem"] = collect_sysmem(llama_pids)
 
         # Build the memory-split view, best source first:
         #   1. NVML per-process VRAM       — exact (Linux / TCC drivers only)
@@ -246,6 +249,45 @@ def build_app(args) -> FastAPI:
     @app.get("/api/launcher/state")
     def get_launcher_state() -> JSONResponse:
         return JSONResponse(launcher_state())
+
+    @app.get("/api/launcher/flags")
+    def get_flags() -> JSONResponse:
+        """The flags supported by the installed llama-server (for the dropdown
+        and per-flag descriptions), or a bundled fallback if it can't be run."""
+        binary = resolve_binary(store.get_settings().get("llama_server_path"))
+        return JSONResponse(flags_mod.get_server_flags(binary))
+
+    # Tail at most the last ~256 KB when the console is first opened, so we don't
+    # ship a huge file on the initial fetch.
+    CONSOLE_HEAD = 256 * 1024
+
+    @app.get("/api/launcher/console")
+    def get_console(offset: int = 0) -> JSONResponse:
+        """Stream the active server log (console output) incrementally.
+
+        Reads the currently-monitored log (the managed log for launched servers,
+        or the watched ``--llama-log`` for an external one). Mirrors the tailer's
+        truncation handling so a restart/rotation re-reads from the top.
+        """
+        path = rt["log_path"] or store.MANAGED_LOG
+        if not path or not os.path.isfile(path):
+            return JSONResponse({"available": False, "content": "", "offset": 0, "size": 0, "path": path})
+        try:
+            size = os.path.getsize(path)
+            start = offset
+            if start > size or start < 0:      # truncated / rotated -> from top
+                start = 0
+            if start == 0 and size > CONSOLE_HEAD:
+                start = size - CONSOLE_HEAD
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                f.seek(start)
+                content = f.read()
+                new_offset = f.tell()
+        except Exception as e:
+            return JSONResponse({"available": False, "error": str(e), "content": "",
+                                 "offset": offset, "size": 0, "path": path})
+        return JSONResponse({"available": True, "content": content,
+                             "offset": new_offset, "size": size, "path": path})
 
     @app.post("/api/launcher/settings")
     async def post_settings(request: Request) -> JSONResponse:

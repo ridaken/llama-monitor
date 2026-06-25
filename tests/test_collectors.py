@@ -9,6 +9,7 @@ import collectors
 from collectors import (
     LlamaCollector,
     LogTailer,
+    collect_sysmem,
     parse_device_baseline,
     parse_device_split,
     parse_prometheus,
@@ -97,6 +98,69 @@ def test_parse_spec_enabled(tmp_path):
     off.write_text("ordinary startup with no speculation\n", encoding="utf-8")
     assert parse_spec_enabled(str(on)) is True
     assert parse_spec_enabled(str(off)) is False
+
+
+# --------------------------------------------------------------------------- #
+# System memory                                                                #
+# --------------------------------------------------------------------------- #
+
+class _FakeVM:
+    total = 32 * 1024**3
+    used = 20 * 1024**3
+    available = 12 * 1024**3
+    percent = 62.5
+
+
+class _FakeMemInfo:
+    def __init__(self, rss):
+        self.rss = rss
+
+
+class _FakeProcess:
+    _rss = {101: 5 * 1024**3, 102: 3 * 1024**3}
+
+    def __init__(self, pid):
+        if pid not in self._rss:
+            raise RuntimeError("no such process")
+        self._pid = pid
+
+    def memory_info(self):
+        return _FakeMemInfo(self._rss[self._pid])
+
+
+def test_collect_sysmem_reports_ram_and_llama_rss(monkeypatch):
+    monkeypatch.setattr(collectors, "psutil", collectors.psutil or object())
+    monkeypatch.setattr(collectors.psutil, "virtual_memory", lambda: _FakeVM(), raising=False)
+    monkeypatch.setattr(collectors.psutil, "Process", _FakeProcess, raising=False)
+
+    out = collect_sysmem({101, 102})
+    assert out["ok"] is True
+    assert out["total"] == _FakeVM.total
+    assert out["percent"] == 62.5
+    assert out["llama_rss"] == 8 * 1024**3   # 5 GB + 3 GB
+
+
+def test_collect_sysmem_skips_unreadable_pids(monkeypatch):
+    monkeypatch.setattr(collectors, "psutil", collectors.psutil or object())
+    monkeypatch.setattr(collectors.psutil, "virtual_memory", lambda: _FakeVM(), raising=False)
+    monkeypatch.setattr(collectors.psutil, "Process", _FakeProcess, raising=False)
+
+    # pid 999 is not readable -> skipped; only pid 101 contributes.
+    out = collect_sysmem({101, 999})
+    assert out["llama_rss"] == 5 * 1024**3
+
+
+def test_collect_sysmem_no_pids_leaves_llama_rss_none(monkeypatch):
+    monkeypatch.setattr(collectors, "psutil", collectors.psutil or object())
+    monkeypatch.setattr(collectors.psutil, "virtual_memory", lambda: _FakeVM(), raising=False)
+    out = collect_sysmem(set())
+    assert out["ok"] is True
+    assert out["llama_rss"] is None
+
+
+def test_collect_sysmem_without_psutil(monkeypatch):
+    monkeypatch.setattr(collectors, "psutil", None)
+    assert collect_sysmem({1})["ok"] is False
 
 
 # --------------------------------------------------------------------------- #

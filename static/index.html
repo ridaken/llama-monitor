@@ -101,7 +101,8 @@
   }
   .lx-toggle { margin-left: auto; background: none; border: none; color: var(--muted);
     font-size: 14px; cursor: pointer; }
-  .launcher-body { padding: 0 14px 14px; display: grid; gap: 10px; }
+  .launcher-body { padding: 0 14px 14px; display: grid; gap: 10px;
+    grid-template-columns: minmax(0, 1fr); }
   .launcher-body[hidden] { display: none; }
   .lx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .lx-label { width: 110px; color: var(--muted); font-size: 12px; flex: none; }
@@ -124,11 +125,16 @@
   .note.good { color: var(--good); }
   .lx-flags { display: grid; gap: 6px; }
   .lx-flag-row { display: flex; gap: 8px; align-items: center; }
-  .lx-flag-row .lx-flag { width: 160px; flex: none; }
-  .lx-flag-row .lx-val { flex: 1; }
+  .lx-flag-row .lx-flag { width: 130px; flex: none; min-width: 130px; }
+  .lx-flag-row .lx-val { width: 120px; flex: none; min-width: 90px; }
+  .lx-flag-desc { flex: 1; min-width: 140px; color: var(--muted); font-size: 11px;
+    line-height: 1.3; word-break: break-word; }
   .lx-flag-row .x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 4px; }
   .lx-flag-row .x:hover { color: var(--bad); }
   .lx-addflag { display: flex; gap: 8px; align-items: center; }
+  /* The flag list has 200+ options, some with long descriptions; cap the select
+     so its widest option can't blow out the panel width. */
+  .lx-addflag select { flex: 1; min-width: 0; max-width: 520px; }
   .lx-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
   .lx-spacer { flex: 1; }
   .pill.warn { background: rgba(210,153,34,.18); color: var(--warn); }
@@ -154,6 +160,24 @@
   .lx-item.file .ic { color: var(--accent); }
   .lx-modal-input { width: 100%; background: #0d1117; color: var(--fg);
     border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+  /* console modal */
+  .console-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .console-modal[hidden] { display: none; }
+  .console-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px; width: min(960px, 94vw); height: min(80vh, 760px);
+    display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.6);
+  }
+  .console-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .console-head .title { font-size: 14px; color: var(--accent); }
+  .console-head .path { font-size: 11px; color: var(--muted); word-break: break-all; flex: 1; }
+  .console-out {
+    flex: 1; overflow: auto; margin: 0; background: #0b0f14; color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
 </style>
 </head>
 <body>
@@ -218,6 +242,7 @@
         <button id="lx-launch" class="btn primary">Launch</button>
         <button id="lx-stop" class="btn">Stop</button>
         <button id="lx-restart" class="btn">Restart</button>
+        <button id="lx-console" class="btn">Console</button>
         <span class="lx-spacer"></span>
         <button id="lx-save" class="btn">Save</button>
         <button id="lx-saveas" class="btn">Save as new…</button>
@@ -231,6 +256,17 @@
       <div id="lx-modal-title" class="lx-modal-title"></div>
       <div id="lx-modal-body" class="lx-modal-body"></div>
       <div id="lx-modal-actions" class="lx-modal-actions"></div>
+    </div>
+  </div>
+
+  <div id="console-modal" class="console-modal" hidden>
+    <div class="console-card">
+      <div class="console-head">
+        <span class="title">llama-server console</span>
+        <span id="console-path" class="path"></span>
+        <button id="console-close" class="btn">Close</button>
+      </div>
+      <pre id="console-out" class="console-out"></pre>
     </div>
   </div>
 
@@ -297,6 +333,11 @@
       <h2>GPUs <span class="tip" data-tip="Per-GPU hardware via NVML. Each sparkline is ~60s of history: temp (°C), util (%), power (W vs limit). 'total' is the combined power draw across GPUs.">i</span>
         <span id="gpu-total-w" class="muted" style="font-weight:400"></span></h2>
       <div id="gpus"><span class="muted">—</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>System memory <span class="tip" data-tip="System RAM via psutil. 'used / total' is whole-machine usage; the sparkline is ~60s of percent-used history. 'llama-server' is the resident set size of the llama-server process — where a model spills over when it doesn't fit in VRAM.">i</span></h2>
+      <div id="sysmem"><span class="muted">—</span></div>
     </div>
   </div>
 
@@ -429,6 +470,31 @@ function renderGpus(gpu) {
     totalW ? `· total ${totalW.toFixed(0)} W` : "";
 }
 
+const sysHist = [];   // rolling system-RAM percent-used history
+function renderSysmem(sm) {
+  const box = document.getElementById("sysmem");
+  if (!sm || !sm.ok) {
+    box.innerHTML = `<span class="muted">${sm && sm.error ? sm.error : "no system memory data"}</span>`;
+    return;
+  }
+  const usedPct = sm.percent ?? (sm.total ? sm.used / sm.total * 100 : 0);
+  sysHist.push(usedPct);
+  while (sysHist.length > MAX_PTS) sysHist.shift();
+  const pts = miniSparkPoints(sysHist, 100);
+  const llama = sm.llama_rss != null ? fmtGB(sm.llama_rss) : "—";
+  box.innerHTML = `
+    <div class="mini"><span class="lbl">used</span>
+      <svg viewBox="0 0 100 22" preserveAspectRatio="none">
+        <polyline fill="none" stroke="${utilColor(usedPct)}" stroke-width="1.5" points="${pts}"/></svg>
+      <span class="val">${usedPct.toFixed(0)} %</span></div>
+    <div class="row" style="margin-top:4px"><span class="k">RAM</span>
+      <span>${fmtGB(sm.used||0)} / ${fmtGB(sm.total||0)}</span></div>
+    <div class="bar"><span style="width:${Math.min(usedPct,100)}%;background:var(--accent)"></span></div>
+    <div class="row" style="margin-top:6px"><span class="k">llama-server
+      <span class="tip" data-tip="Resident set size (RSS) of the llama-server process in system RAM — the part of the model and runtime not living in VRAM.">i</span></span>
+      <span${sm.llama_rss == null ? ' class="muted"' : ""}>${llama}</span></div>`;
+}
+
 function renderSlots(slots) {
   const box = document.getElementById("slots");
   const list = slots && slots.list;
@@ -537,6 +603,7 @@ async function tick() {
     renderSplit(d.split || [], d.split_log_configured, d.split_source);
     renderSlots(d.slots);
     renderGpus(d.gpu);
+    renderSysmem(d.sysmem);
 
     // The backend is authoritative about activity (it watches the log); fall
     // back to inferring it from the data when that field isn't present.

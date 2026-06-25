@@ -464,6 +464,42 @@ def _decode(v) -> str:
 # Process discovery + log parsing for the model split                          #
 # --------------------------------------------------------------------------- #
 
+def collect_sysmem(llama_pids: Optional[set[int]] = None) -> dict:
+    """System RAM utilisation, plus llama-server's resident set size.
+
+    Complements the GPU panel: when a model spills out of VRAM into system RAM,
+    ``llama_rss`` (summed RSS of the llama-server process[es]) is where it shows
+    up. Degrades to ``{"ok": False}`` if psutil isn't available.
+    """
+    if psutil is None:
+        return {"ok": False, "error": "psutil not installed"}
+    try:
+        v = psutil.virtual_memory()
+    except Exception as e:  # pragma: no cover - psutil failure is rare
+        return {"ok": False, "error": str(e)}
+
+    llama_rss: Optional[int] = None
+    if llama_pids:
+        total = 0
+        found = False
+        for pid in llama_pids:
+            try:
+                total += psutil.Process(pid).memory_info().rss
+                found = True
+            except Exception:
+                continue
+        llama_rss = total if found else None
+
+    return {
+        "ok": True,
+        "total": v.total,
+        "used": v.used,
+        "available": v.available,
+        "percent": v.percent,
+        "llama_rss": llama_rss,
+    }
+
+
 def find_llama_pids(name_hint: str = "llama", port: Optional[int] = None) -> set[int]:
     """Find llama-server PID(s) by process name and/or the port it listens on."""
     pids: set[int] = set()
