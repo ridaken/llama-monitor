@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app as app_module
+import launcher
 import store
 
 
@@ -100,3 +101,41 @@ def test_console_endpoint_missing_log_is_unavailable(client):
     body = client.get("/api/launcher/console", params={"offset": 0}).json()
     assert body["available"] is False
     assert body["content"] == ""
+
+
+# --------------------------------------------------------------------------- #
+# Explicit --llama-url takes precedence over re-adopting a launched server     #
+# --------------------------------------------------------------------------- #
+
+def _seed_running_server(monkeypatch, tmp_path):
+    """Redirect state to tmp and record a (pretend-alive) launched server."""
+    monkeypatch.setattr(store, "HOME_DIR", str(tmp_path))
+    monkeypatch.setattr(store, "STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setattr(store, "MANAGED_LOG", str(tmp_path / "llama-server.log"))
+    monkeypatch.setattr(store.shutil, "which", lambda name: None)
+    monkeypatch.setattr(launcher, "_process_alive", lambda pid: True)
+    store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1"},
+                       "started_at": 1.0, "log_path": str(tmp_path / "llama-server.log")})
+
+
+def test_explicit_llama_url_skips_adoption(monkeypatch, tmp_path):
+    _seed_running_server(monkeypatch, tmp_path)
+    args = argparse.Namespace(llama_url="http://localhost:8001", llama_log=None,
+                              port=8500, host="127.0.0.1")
+    with TestClient(app_module.build_app(args)) as c:
+        st = c.get("/api/launcher/state").json()["status"]
+    # An explicit watch target wins -> the launched server is NOT adopted.
+    assert st["state"] == "stopped"
+    assert st["adopted"] is False
+
+
+def test_default_llama_url_adopts_live_server(monkeypatch, tmp_path):
+    _seed_running_server(monkeypatch, tmp_path)
+    args = argparse.Namespace(llama_url=app_module.DEFAULT_LLAMA_URL, llama_log=None,
+                              port=8500, host="127.0.0.1")
+    with TestClient(app_module.build_app(args)) as c:
+        st = c.get("/api/launcher/state").json()["status"]
+    # No explicit target -> re-adopt the still-running launched server.
+    assert st["state"] == "running"
+    assert st["adopted"] is True
+    assert st["config_name"] == "c1"

@@ -43,6 +43,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(HERE, "static")
 MIB = 1024 * 1024
 
+# The fallback watch target when neither --llama-url nor $LLAMA_URL is given. A
+# value different from this means the user explicitly chose a server to watch, so
+# it takes precedence over re-adopting a previously-launched one (see build_app).
+DEFAULT_LLAMA_URL = "http://localhost:8080"
+
 
 def _seg(label: str, num_bytes: int) -> dict:
     return {"label": label, "bytes": num_bytes, "kind": "cpu" if label == "CPU" else "gpu"}
@@ -105,11 +110,18 @@ def build_app(args) -> FastAPI:
     # If a previous dashboard run launched a server that's still alive, re-adopt
     # it and point monitoring at it — so killing and relaunching the dashboard
     # reconnects to the running server instead of showing it disconnected.
-    adopted = manager.adopt()
-    if adopted:
-        a_port = adopted.get("port")
-        retarget(f"http://127.0.0.1:{a_port}",
-                 adopted.get("log_path") or store.MANAGED_LOG, a_port)
+    #
+    # But an explicit --llama-url / $LLAMA_URL (anything other than the default)
+    # is a deliberate "watch this server" instruction and wins: in that case we
+    # skip adoption entirely and watch exactly what was asked for. A bare
+    # `python app.py` (default URL) still auto-reconnects.
+    cli_target_explicit = (args.llama_url or "") != DEFAULT_LLAMA_URL
+    if not cli_target_explicit:
+        adopted = manager.adopt()
+        if adopted:
+            a_port = adopted.get("port")
+            retarget(f"http://127.0.0.1:{a_port}",
+                     adopted.get("log_path") or store.MANAGED_LOG, a_port)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -396,8 +408,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description="llama-server live monitor")
     p.add_argument(
         "--llama-url",
-        default=os.environ.get("LLAMA_URL", "http://localhost:8080"),
-        help="Base URL of a running llama-server to watch initially (default: http://localhost:8080)",
+        default=os.environ.get("LLAMA_URL", DEFAULT_LLAMA_URL),
+        help=f"Base URL of a running llama-server to watch (default: {DEFAULT_LLAMA_URL}). "
+             "A non-default value takes precedence over re-adopting a launched server.",
     )
     p.add_argument(
         "--llama-log",
