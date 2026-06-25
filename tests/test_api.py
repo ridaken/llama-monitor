@@ -68,3 +68,35 @@ def test_launch_with_bad_model_returns_400(client):
                     json={"model_path": "C:/definitely/missing.gguf", "port": 8001, "flags": []})
     assert r.status_code == 400
     assert "error" in r.json()
+
+
+def test_flags_endpoint_returns_bundled_without_binary(client):
+    # The client fixture stubs shutil.which -> None, so no binary resolves.
+    body = client.get("/api/launcher/flags").json()
+    assert body["source"] == "bundled"
+    assert isinstance(body["flags"], list) and body["flags"]
+    assert all("flags" in f and "desc" in f for f in body["flags"])
+
+
+def test_console_endpoint_tails_managed_log(client, tmp_path):
+    # The dashboard starts with no log target; it falls back to MANAGED_LOG.
+    import store
+    log = store.MANAGED_LOG
+    with open(log, "w", encoding="utf-8") as f:
+        f.write("first line\n")
+
+    first = client.get("/api/launcher/console", params={"offset": 0}).json()
+    assert first["available"] is True
+    assert "first line" in first["content"]
+
+    # Append, then fetch only the new bytes from the returned offset.
+    with open(log, "a", encoding="utf-8") as f:
+        f.write("second line\n")
+    nxt = client.get("/api/launcher/console", params={"offset": first["offset"]}).json()
+    assert nxt["content"] == "second line\n"
+
+
+def test_console_endpoint_missing_log_is_unavailable(client):
+    body = client.get("/api/launcher/console", params={"offset": 0}).json()
+    assert body["available"] is False
+    assert body["content"] == ""

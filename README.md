@@ -14,6 +14,9 @@ live (1s refresh):
 - **Slots** — per-slot state (idle / prefill / generating), context fill, prompt
   length and tokens generated
 - **GPU hardware** — per-GPU temp/util/power sparklines, VRAM, and total draw
+- **System memory** — system RAM used/total with a sparkline, plus the
+  llama-server process's resident set size (where a model spills over when it
+  doesn't fit in VRAM)
 
 ### Speculative decoding (MTP / draft)
 
@@ -34,8 +37,13 @@ you, so you don't need a separate launch script:
   warning and a Browse button to point at the executable. Your choice is
   persisted across sessions.
 - **Pick a model** — paste a path to a `.gguf` or **Browse** the filesystem.
-- **Set flags** — add flags from the dropdown of common ones (`-c`, `-ngl`,
-  `-fa`, `--parallel`, `-a`, …) or type any flag/value by hand.
+- **Set flags** — add flags from the dropdown, which lists **every flag your
+  installed llama-server supports** (parsed live from `llama-server --help`,
+  alphabetised), or type any flag/value by hand. Each known flag shows a
+  description next to it — whether picked from the dropdown or typed as a custom
+  flag — and its value hint becomes the input placeholder.
+- **Console** — the **Console** button opens a live, auto-scrolling view of
+  llama-server's console output (it tails the server's log file).
 - **Port** — defaults to `8001`; change it if you like, but it can't be removed
   (the dashboard needs it to know where to monitor).
 - **Launch / Stop / Restart** — llama-monitor starts the server and immediately
@@ -55,7 +63,9 @@ load it. If you switch with unsaved edits, you're prompted to **Save**
 
 > A launched server is left running when you close the dashboard — stop it
 > explicitly from the panel. Single instance: launching replaces any server the
-> panel previously started.
+> panel previously started. Closing or reloading the tab while a server is
+> running pops up a browser confirmation so you don't lose the dashboard by
+> accident; the server keeps running either way.
 
 ## How it gets the data
 
@@ -64,6 +74,9 @@ load it. If you switch with unsaved edits, you're prompted to **Save**
 | Model / ctx / slots | llama-server `GET /props`, `/v1/models`, `/slots` |
 | pp & decode TPS, KV usage | llama-server `GET /metrics` (needs `--metrics`) |
 | GPU temp/util/power/VRAM | NVML (`nvidia-ml-py`) |
+| System RAM + llama-server RSS | `psutil` |
+| Console output | the server's log file, tailed |
+| Supported flags + descriptions | parsed from `llama-server --help` |
 | GPU portion of the split | NVML per-process VRAM, matched to the llama-server PID |
 | CPU portion of the split | parsed once from llama-server's startup log (optional) |
 
