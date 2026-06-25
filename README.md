@@ -41,7 +41,10 @@ you, so you don't need a separate launch script:
   installed llama-server supports** (parsed live from `llama-server --help`,
   alphabetised), or type any flag/value by hand. Each known flag shows a
   description next to it — whether picked from the dropdown or typed as a custom
-  flag — and its value hint becomes the input placeholder.
+  flag — and its value hint becomes the input placeholder. The Flags section
+  **collapses** (click the `▾ Flags` label) to free up dashboard space; collapsed
+  it shows the currently-set flags as a read-only list — expand it to edit. The
+  collapsed/expanded choice is remembered across sessions.
 - **Console** — the **Console** button opens a live, auto-scrolling view of
   llama-server's console output (it tails the server's log file).
 - **Port** — defaults to `8001`; change it if you like, but it can't be removed
