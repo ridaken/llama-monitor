@@ -102,6 +102,15 @@ def build_app(args) -> FastAPI:
 
     manager = ServerManager(retarget)
 
+    # If a previous dashboard run launched a server that's still alive, re-adopt
+    # it and point monitoring at it — so killing and relaunching the dashboard
+    # reconnects to the running server instead of showing it disconnected.
+    adopted = manager.adopt()
+    if adopted:
+        a_port = adopted.get("port")
+        retarget(f"http://127.0.0.1:{a_port}",
+                 adopted.get("log_path") or store.MANAGED_LOG, a_port)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Startup happens above (collector construction); only teardown is needed.

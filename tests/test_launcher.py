@@ -3,7 +3,9 @@ stop / restart lifecycle. A fake Popen stands in for a real llama-server so the
 tests never load a model or open a port.
 """
 
+import os
 import sys
+import types
 
 import pytest
 
@@ -69,8 +71,10 @@ def test_resolve_binary_bare_name_uses_path(monkeypatch):
 @pytest.fixture
 def good_settings(monkeypatch, tmp_path):
     """A valid binary + a managed log under tmp, so only the config under test
-    determines whether launch() raises."""
+    determines whether launch() raises. State is redirected to tmp so the
+    persisted running-record never touches the real ~/.llama-monitor."""
     monkeypatch.setattr(store, "HOME_DIR", str(tmp_path))
+    monkeypatch.setattr(store, "STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setattr(store, "MANAGED_LOG", str(tmp_path / "llama-server.log"))
     monkeypatch.setattr(store, "get_settings",
                         lambda: {"llama_server_path": sys.executable, "default_port": 8001})
@@ -142,6 +146,7 @@ def fake_popen(monkeypatch):
 
     def _popen(argv, **kw):
         captured["argv"] = argv
+        captured["kwargs"] = kw
         captured["proc"] = FakeProc(argv, **kw)
         return captured["proc"]
 
@@ -184,3 +189,81 @@ def test_restart_requires_prior_launch():
     mgr = ServerManager(lambda *a: None)
     with pytest.raises(LaunchError, match="Nothing to restart"):
         mgr.restart()
+
+
+# --------------------------------------------------------------------------- #
+# Survive a dashboard restart: detach on spawn + persist/re-adopt              #
+# --------------------------------------------------------------------------- #
+
+def test_launch_spawns_detached(good_settings, fake_popen):
+    """The server must outlive the dashboard, so it's spawned detached from the
+    dashboard's console / process group."""
+    mgr = ServerManager(lambda *a: None)
+    mgr.launch({"name": "c1", "model_path": _gguf(good_settings), "port": 9001})
+    kw = fake_popen["kwargs"]
+    if os.name == "nt":
+        assert kw["creationflags"] & launcher.subprocess.CREATE_NEW_PROCESS_GROUP
+        assert kw["creationflags"] & launcher.subprocess.DETACHED_PROCESS
+    else:
+        assert kw.get("start_new_session") is True
+
+
+def test_launch_persists_running_record_and_stop_clears_it(good_settings, fake_popen):
+    mgr = ServerManager(lambda *a: None)
+    mgr.launch({"name": "c1", "model_path": _gguf(good_settings), "port": 9001})
+    rec = store.get_running()
+    assert rec is not None
+    assert rec["port"] == 9001
+    assert rec["pid"] == fake_popen["proc"].pid
+    assert rec["log_path"] == store.MANAGED_LOG
+
+    mgr.stop()
+    assert store.get_running() is None
+
+
+def test_adopt_reattaches_to_a_live_server(good_settings, monkeypatch):
+    """A restarted dashboard re-adopts a server a previous run launched."""
+    monkeypatch.setattr(launcher, "_process_alive", lambda pid: True)
+    store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1"},
+                       "started_at": 1.0, "log_path": str(good_settings / "x.log")})
+    captured = []
+    mgr = ServerManager(lambda *a: captured.append(a))
+
+    rec = mgr.adopt()
+    assert rec is not None and rec["port"] == 9001
+    st = mgr.status()
+    assert st["state"] == "running"
+    assert st["adopted"] is True
+    assert st["pid"] == 4321
+    assert st["config_name"] == "c1"
+
+
+def test_adopt_clears_stale_record_when_process_gone(good_settings, monkeypatch):
+    monkeypatch.setattr(launcher, "_process_alive", lambda pid: False)
+    store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1"}})
+    mgr = ServerManager(lambda *a: None)
+
+    assert mgr.adopt() is None
+    assert store.get_running() is None          # stale record dropped
+    assert mgr.status()["state"] == "stopped"
+
+
+def test_stop_adopted_server_terminates_pid_and_clears_record(good_settings, monkeypatch):
+    monkeypatch.setattr(launcher, "_process_alive", lambda pid: True)
+    seen = {}
+
+    class FakeP:
+        def __init__(self, pid): seen["pid"] = pid
+        def terminate(self): seen["terminated"] = True
+        def wait(self, timeout=None): return 0
+        def kill(self): seen["killed"] = True
+
+    monkeypatch.setattr(launcher, "psutil", types.SimpleNamespace(Process=FakeP))
+    store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1"}})
+    mgr = ServerManager(lambda *a: None)
+    mgr.adopt()
+
+    st = mgr.stop()
+    assert seen["pid"] == 4321 and seen.get("terminated") is True
+    assert st["state"] == "stopped"
+    assert store.get_running() is None
