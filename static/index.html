@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>llama-monitor</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --good: #3fb950; --warn: #d29922; --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px;
+    padding: 12px 18px; border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; color: var(--accent); }
+  .pill { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .pill.on  { background: rgba(63,185,80,.15); color: var(--good); }
+  .pill.off { background: rgba(248,81,73,.15);  color: var(--bad); }
+  .grid {
+    display: grid; gap: 14px; padding: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px;
+  }
+  .panel h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); margin: 0 0 10px;
+  }
+  .big { font-size: 30px; font-weight: 600; }
+  .unit { font-size: 13px; color: var(--muted); }
+  .row { display: flex; justify-content: space-between; margin: 4px 0; }
+  .row .k { color: var(--muted); }
+  .bar {
+    height: 10px; border-radius: 5px; background: #21262d;
+    overflow: hidden; margin-top: 6px; display: flex;
+  }
+  .bar > span { height: 100%; }
+  .span-row { display: flex; flex-direction: column; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 12px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+  .gpu-card + .gpu-card { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .gpu-name { font-weight: 600; margin-bottom: 6px; }
+  .muted { color: var(--muted); }
+  .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  svg { width: 100%; height: 72px; display: block; }
+  .axlbl { fill: var(--muted); font-size: 8px; text-anchor: end; }
+  .grid-line { stroke: var(--border); stroke-width: 0.5; }
+  .tps-pair { display: flex; gap: 28px; }
+  .slot { padding: 8px 0; border-top: 1px solid var(--border); }
+  .slot:first-child { border-top: none; }
+  .slot-head { display: flex; justify-content: space-between; align-items: center; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 9px; }
+  .badge.idle { background: #21262d; color: var(--muted); }
+  .badge.generating { background: rgba(63,185,80,.15); color: var(--good); }
+  .badge.prefill { background: rgba(210,153,34,.18); color: var(--warn); }
+  .slot-meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .mini { display: grid; grid-template-columns: 34px 1fr 60px; align-items: center; gap: 6px; margin-top: 4px; }
+  .mini .lbl { font-size: 11px; color: var(--muted); }
+  .mini .val { font-size: 11px; text-align: right; }
+  .mini svg { height: 22px; }
+  /* info tooltip */
+  .tip {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 13px; height: 13px; margin-left: 5px; border-radius: 50%;
+    border: 1px solid var(--muted); color: var(--muted);
+    font: 700 9px/1 ui-sans-serif, system-ui, sans-serif; font-style: normal;
+    cursor: help; vertical-align: middle; text-transform: none; letter-spacing: 0;
+  }
+  .tip::after {
+    content: attr(data-tip);
+    position: absolute; left: 0; top: 150%;
+    width: max-content; max-width: 240px;
+    background: #0b0f14; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 9px;
+    font: 400 11px/1.35 ui-sans-serif, system-ui, sans-serif; text-transform: none;
+    letter-spacing: 0; text-align: left; white-space: normal;
+    opacity: 0; visibility: hidden; transition: opacity .12s; z-index: 50;
+    box-shadow: 0 4px 14px rgba(0,0,0,.5); pointer-events: none;
+  }
+  .tip:hover::after { opacity: 1; visibility: visible; }
+
+  /* launcher */
+  .launcher {
+    margin: 16px 16px 0; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--panel);
+  }
+  .launcher-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+  .launcher-head h2 {
+    font-size: 12px; margin: 0; color: var(--accent);
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .lx-toggle { margin-left: auto; background: none; border: none; color: var(--muted);
+    font-size: 14px; cursor: pointer; }
+  .launcher-body { padding: 0 14px 14px; display: grid; gap: 10px; }
+  .launcher-body[hidden] { display: none; }
+  .lx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .lx-label { width: 110px; color: var(--muted); font-size: 12px; flex: none; }
+  .launcher input[type=text], .launcher input[type=number], .launcher select {
+    background: #0d1117; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px;
+  }
+  .launcher input[type=text] { flex: 1; min-width: 200px; }
+  .lx-port-input { width: 90px; }
+  .btn {
+    background: #21262d; color: var(--fg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: rgba(88,166,255,.15); border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .lx-path { flex: 1; min-width: 200px; word-break: break-all; font-size: 12px; }
+  .lx-warn { color: var(--warn); font-style: normal; }
+  .note.bad { color: var(--bad); }
+  .note.good { color: var(--good); }
+  .lx-flags { display: grid; gap: 6px; }
+  .lx-flag-row { display: flex; gap: 8px; align-items: center; }
+  .lx-flag-row .lx-flag { width: 160px; flex: none; }
+  .lx-flag-row .lx-val { flex: 1; }
+  .lx-flag-row .x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 4px; }
+  .lx-flag-row .x:hover { color: var(--bad); }
+  .lx-addflag { display: flex; gap: 8px; align-items: center; }
+  .lx-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+  .lx-spacer { flex: 1; }
+  .pill.warn { background: rgba(210,153,34,.18); color: var(--warn); }
+  /* modal */
+  .lx-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .lx-modal[hidden] { display: none; }
+  .lx-modal-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; width: min(640px, 92vw); max-height: 80vh;
+    display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,.6);
+  }
+  .lx-modal-title { font-size: 14px; color: var(--accent); margin-bottom: 10px; }
+  .lx-modal-body { overflow: auto; }
+  .lx-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+  .lx-browse-path { font-size: 12px; color: var(--muted); margin-bottom: 8px; word-break: break-all; }
+  .lx-list { border: 1px solid var(--border); border-radius: 6px; max-height: 46vh; overflow: auto; }
+  .lx-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer;
+    border-bottom: 1px solid #1c2128; font-size: 13px; }
+  .lx-item:last-child { border-bottom: none; }
+  .lx-item:hover { background: #1c2128; }
+  .lx-item .ic { color: var(--muted); width: 16px; text-align: center; flex: none; }
+  .lx-item.file .ic { color: var(--accent); }
+  .lx-modal-input { width: 100%; background: #0d1117; color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>llama-monitor</h1>
+    <span class="tip" data-tip="Polls llama-server every 1s while it's generating. When idle it watches the log file instead of polling the server (shown as 'idle (log)') so it doesn't wake the server's loop. Without a log it falls back to slower idle HTTP polling ('idle (http)').">i</span>
+    <span id="status" class="pill off">connecting…</span>
+    <span id="model" class="muted"></span>
+    <span id="updated" class="muted" style="margin-left:auto;"></span>
+  </header>
+
+  <section class="launcher">
+    <div class="launcher-head" id="lx-head">
+      <h2>Launch / manage llama-server</h2>
+      <span id="lx-status" class="pill off">stopped</span>
+      <button id="lx-toggle" class="lx-toggle" title="show/hide">▾</button>
+    </div>
+    <div class="launcher-body" id="lx-body">
+      <div class="lx-row">
+        <span class="lx-label">llama-server</span>
+        <span id="lx-bin-warn" class="lx-warn" hidden>⚠</span>
+        <span id="lx-bin-path" class="lx-path muted">—</span>
+        <button id="lx-bin-browse" class="btn">Browse…</button>
+      </div>
+      <div id="lx-bin-msg" class="note bad" hidden>Set the path to llama-server before launching.</div>
+
+      <div class="lx-row">
+        <span class="lx-label">Configuration</span>
+        <select id="lx-config"></select>
+        <button id="lx-delete" class="btn">Delete</button>
+      </div>
+
+      <div class="lx-row">
+        <span class="lx-label">Model (.gguf)</span>
+        <input id="lx-model" type="text" placeholder="path to model.gguf" />
+        <button id="lx-model-browse" class="btn">Browse…</button>
+      </div>
+
+      <div class="lx-row">
+        <span class="lx-label">Port</span>
+        <input id="lx-port" type="number" min="1" max="65535" class="lx-port-input" />
+        <span class="note">llama-monitor adds <code>--metrics</code> and <code>--log-file</code> automatically.</span>
+      </div>
+
+      <div class="lx-row" style="align-items:flex-start">
+        <span class="lx-label" style="margin-top:6px">Flags</span>
+        <div style="flex:1">
+          <div id="lx-flags" class="lx-flags"></div>
+          <div class="lx-addflag" style="margin-top:8px">
+            <select id="lx-flag-pick"></select>
+            <button id="lx-flag-add" class="btn">Add flag</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="lx-row">
+        <span class="lx-label">Config name</span>
+        <input id="lx-name" type="text" placeholder="name this configuration" />
+      </div>
+
+      <div class="lx-actions">
+        <button id="lx-launch" class="btn primary">Launch</button>
+        <button id="lx-stop" class="btn">Stop</button>
+        <button id="lx-restart" class="btn">Restart</button>
+        <span class="lx-spacer"></span>
+        <button id="lx-save" class="btn">Save</button>
+        <button id="lx-saveas" class="btn">Save as new…</button>
+      </div>
+      <div id="lx-msg" class="note"></div>
+    </div>
+  </section>
+
+  <div id="lx-modal" class="lx-modal" hidden>
+    <div class="lx-modal-card">
+      <div id="lx-modal-title" class="lx-modal-title"></div>
+      <div id="lx-modal-body" class="lx-modal-body"></div>
+      <div id="lx-modal-actions" class="lx-modal-actions"></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Session <span class="tip" data-tip="The model loaded in llama-server and the live state of its request slots.">i</span></h2>
+      <div class="row"><span class="k">Model</span><span id="s-model">—</span></div>
+      <div class="row"><span class="k">Context (n_ctx)
+        <span class="tip" data-tip="Maximum context window in tokens the server was launched with (-c). Shared across all slots when KV-cache is unified.">i</span></span><span id="s-ctx">—</span></div>
+      <div class="row"><span class="k">Slots (busy/total)
+        <span class="tip" data-tip="A slot is one parallel inference lane — an independent request the server can generate at the same time as the others. The count comes from --parallel (default -1 = auto, which resolved to 4 here), so up to 4 requests run concurrently; any beyond that queue (shown as 'deferred'). This row is how many slots are busy right now vs the total.">i</span></span><span id="s-slots">—</span></div>
+      <div class="row"><span class="k">Requests processing
+        <span class="tip" data-tip="Number of requests being generated right now (from /metrics).">i</span></span><span id="s-req">—</span></div>
+      <div class="row"><span class="k">KV-cache usage
+        <span class="tip" data-tip="How full the KV cache is: tokens currently held across all slots (prompt + generated, including retained prompt caches) vs the context size.">i</span></span><span id="s-kv-pct">—</span></div>
+      <div class="bar"><span id="s-kv-bar" style="width:0;background:var(--accent)"></span></div>
+    </div>
+
+    <div class="panel">
+      <h2>Throughput <span class="tip" data-tip="Generation speed. 'decode' = token generation; 'pp' = prompt processing (prefill of the input before generation starts).">i</span></h2>
+      <div class="tps-pair">
+        <div>
+          <div class="big"><span id="t-decode">—</span> <span class="unit">tok/s decode</span>
+            <span class="tip" data-tip="Token-generation speed in tokens/sec. Shows the live rate (3-sample smoothed) while generating; when idle it shows the last request's average.">i</span></div>
+          <div class="muted">live · last req <span id="t-decode-avg">—</span></div>
+        </div>
+        <div>
+          <div class="big"><span id="t-pp">—</span> <span class="unit">tok/s pp</span>
+            <span class="tip" data-tip="Prompt-processing (prefill) speed of the most recent request, in tokens/sec.">i</span></div>
+          <div class="muted">last prompt</div>
+        </div>
+      </div>
+      <svg id="spark" viewBox="0 0 320 72">
+        <line class="grid-line" x1="34" y1="8"  x2="318" y2="8" />
+        <line class="grid-line" x1="34" y1="33" x2="318" y2="33" />
+        <line class="grid-line" x1="34" y1="58" x2="318" y2="58" />
+        <text id="ax-max"  class="axlbl" x="31" y="11">0</text>
+        <text id="ax-mid"  class="axlbl" x="31" y="36">0</text>
+        <text id="ax-zero" class="axlbl" x="31" y="60">0</text>
+        <polyline id="spark-line" fill="none" stroke="var(--good)" stroke-width="2" points="" />
+      </svg>
+      <div class="note">decode tok/s (3-sample smoothed), last ~60s</div>
+      <div class="row" style="margin-top:10px"><span class="k">Spec accept (tok/step)
+        <span class="tip" data-tip="Speculative decoding (MTP): average tokens produced per model step. ~1 means speculation isn't helping; up to (draft-n-max + 1) is ideal. 'live' is estimated during generation; '(last req)' is the exact value parsed from the log, with the draft acceptance rate.">i</span></span><span id="t-spec">—</span></div>
+      <div class="row" style="margin-top:10px"><span class="k">Last request
+        <span class="tip" data-tip="Exact wall-clock time spent on the most recent completed request, from the log. Prompt (pp) = prefilling the input; Generation = producing all output tokens (reasoning + answer combined — the server doesn't time those separately); Total = pp + generation.">i</span></span><span id="lr-total" class="muted">—</span></div>
+      <div class="row" style="margin:2px 0 2px 12px"><span class="k">prompt (pp)</span><span id="lr-pp">—</span></div>
+      <div class="row" style="margin:2px 0 2px 12px"><span class="k">generation</span><span id="lr-gen">—</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>Memory split <span class="tip" data-tip="Estimated VRAM the model occupies on each GPU (weights + KV cache + compute buffers). On Windows this is approximate — free-VRAM-at-load minus free-VRAM-now from NVML — because per-process VRAM isn't reported. The note below states the source.">i</span></h2>
+      <div class="bar" id="split-bar"></div>
+      <div class="legend" id="split-legend"></div>
+      <div class="note" id="split-note"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Slots <span class="tip" data-tip="A 'slot' is one of the server's parallel inference lanes — each can hold and generate one request independently and in parallel. The count comes from --parallel (default -1 = auto, which resolved to 4 here), with a shared/unified KV cache. Each slot keeps its own context and can cache its last prompt for fast reuse on a follow-up. State per slot: idle = free or just holding a cached prompt; prefill = processing the incoming prompt (bar = progress); generating = producing tokens (bar = how full its context is).">i</span></h2>
+      <div id="slots"><span class="muted">—</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>GPUs <span class="tip" data-tip="Per-GPU hardware via NVML. Each sparkline is ~60s of history: temp (°C), util (%), power (W vs limit). 'total' is the combined power draw across GPUs.">i</span>
+        <span id="gpu-total-w" class="muted" style="font-weight:400"></span></h2>
+      <div id="gpus"><span class="muted">—</span></div>
+    </div>
+  </div>
+
+<script>
+const COLORS = ["#58a6ff", "#bc8cff", "#3fb950", "#d29922", "#f778ba", "#39c5cf"];
+const fmtGB = b => (b / 1073741824).toFixed(1) + " GB";
+const num = (v, d=1) => (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
+const tempColor = t => t >= 84 ? "var(--bad)" : t >= 72 ? "var(--warn)" : "var(--good)";
+const utilColor = u => u >= 90 ? "var(--warn)" : "var(--good)";
+
+// Per-GPU rolling history for the hardware sparklines.
+const gpuHist = {};   // { index: { temp:[], util:[], power:[] } }
+function pushHist(idx, key, v, cap = MAX_PTS) {
+  gpuHist[idx] = gpuHist[idx] || { temp: [], util: [], power: [] };
+  const a = gpuHist[idx][key];
+  a.push(v ?? 0);
+  while (a.length > cap) a.shift();
+}
+function miniSparkPoints(arr, max) {
+  if (!arr || arr.length < 2) return "";
+  const W = 100, H = 22, T = 2, B = 20, m = Math.max(max, 1);
+  return arr.map((v, i) => {
+    const x = (i / (MAX_PTS - 1)) * W;
+    const y = B - (Math.min(v, m) / m) * (B - T);
+    return x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+}
+function miniRow(idx, key, max, color, valText) {
+  const pts = miniSparkPoints((gpuHist[idx] || {})[key], max);
+  return `<div class="mini"><span class="lbl">${key}</span>
+    <svg viewBox="0 0 100 22" preserveAspectRatio="none">
+      <polyline fill="none" stroke="${color}" stroke-width="1.5" points="${pts}"/></svg>
+    <span class="val">${valText}</span></div>`;
+}
+
+const history = [];   // smoothed decode tps samples for the sparkline
+const MAX_PTS = 60;
+const smoothBuf = [];          // last few raw live values for 3-sample smoothing
+const SMOOTH_N = 3;
+function smoothLive(raw) {
+  if (raw === null || raw === undefined) { smoothBuf.length = 0; return null; }
+  smoothBuf.push(raw);
+  while (smoothBuf.length > SMOOTH_N) smoothBuf.shift();
+  return smoothBuf.reduce((a, b) => a + b, 0) / smoothBuf.length;
+}
+
+function setStatus(online) {
+  const el = document.getElementById("status");
+  el.textContent = online ? "llama-server online" : "llama-server unreachable";
+  el.className = "pill " + (online ? "on" : "off");
+}
+
+const PLOT = { L: 34, R: 318, T: 8, B: 58 };
+function renderSpark() {
+  const max = Math.max(1, ...history);
+  document.getElementById("ax-max").textContent = max.toFixed(max < 10 ? 1 : 0);
+  document.getElementById("ax-mid").textContent = (max / 2).toFixed(max < 10 ? 1 : 0);
+  document.getElementById("ax-zero").textContent = "0";
+  if (history.length < 2) { document.getElementById("spark-line").setAttribute("points",""); return; }
+  const pts = history.map((v, i) => {
+    const x = PLOT.L + (i / (MAX_PTS - 1)) * (PLOT.R - PLOT.L);
+    const y = PLOT.B - (v / max) * (PLOT.B - PLOT.T);
+    return x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+  document.getElementById("spark-line").setAttribute("points", pts);
+}
+
+const SPLIT_SRC_NOTE = {
+  "nvml": "exact (NVML per-process VRAM)",
+  "log": "from llama-server load log",
+  "nvml-delta": "approx · live VRAM used since model load (other apps can skew it)",
+};
+function renderSplit(split, cpuAvailable, source) {
+  const bar = document.getElementById("split-bar");
+  const legend = document.getElementById("split-legend");
+  const note = document.getElementById("split-note");
+  bar.innerHTML = ""; legend.innerHTML = "";
+  const total = split.reduce((a, s) => a + s.bytes, 0);
+  if (!total) {
+    note.textContent = cpuAvailable
+      ? "No split found in the log yet (waiting for model load lines)."
+      : "Pass --llama-log <path> so the dashboard can read the per-device split.";
+    return;
+  }
+  split.forEach((s, i) => {
+    const c = COLORS[i % COLORS.length];
+    const seg = document.createElement("span");
+    seg.style.width = (s.bytes / total * 100) + "%";
+    seg.style.background = c;
+    bar.appendChild(seg);
+    const item = document.createElement("span");
+    item.innerHTML = `<i style="background:${c}"></i>${s.label}: ${fmtGB(s.bytes)}`;
+    legend.appendChild(item);
+  });
+  note.textContent = SPLIT_SRC_NOTE[source] || "";
+}
+
+function renderGpus(gpu) {
+  const box = document.getElementById("gpus");
+  if (!gpu || !gpu.ok) {
+    box.innerHTML = `<span class="muted">${gpu && gpu.error ? gpu.error : "no GPU data"}</span>`;
+    return;
+  }
+  box.innerHTML = "";
+  let totalW = 0;
+  gpu.devices.forEach(d => {
+    pushHist(d.index, "temp", d.temp);
+    pushHist(d.index, "util", d.util_gpu);
+    pushHist(d.index, "power", d.power);
+    if (d.power) totalW += d.power;
+    const card = document.createElement("div");
+    card.className = "gpu-card";
+    const memPct = d.mem_total ? (d.mem_used / d.mem_total * 100) : 0;
+    const temp = d.temp ?? null, util = d.util_gpu ?? null;
+    const pLimit = d.power_limit || 1;
+    card.innerHTML = `
+      <div class="gpu-name">CUDA${d.index} · ${d.name ?? "GPU"}</div>
+      ${miniRow(d.index, "temp", 100, "var(--bad)",
+        `<span style="color:${temp!==null?tempColor(temp):'inherit'}">${num(temp,0)} °C</span>`)}
+      ${miniRow(d.index, "util", 100, "var(--accent)",
+        `<span style="color:${util!==null?utilColor(util):'inherit'}">${num(util,0)} %</span>`)}
+      ${miniRow(d.index, "power", pLimit, "var(--warn)",
+        `${num(d.power,0)}/${num(d.power_limit,0)} W`)}
+      <div class="row" style="margin-top:4px"><span class="k">VRAM</span>
+        <span>${fmtGB(d.mem_used||0)} / ${fmtGB(d.mem_total||0)}</span></div>
+      <div class="bar"><span style="width:${memPct}%;background:var(--accent)"></span></div>`;
+    box.appendChild(card);
+  });
+  document.getElementById("gpu-total-w").textContent =
+    totalW ? `· total ${totalW.toFixed(0)} W` : "";
+}
+
+function renderSlots(slots) {
+  const box = document.getElementById("slots");
+  const list = slots && slots.list;
+  if (!list || !list.length) { box.innerHTML = `<span class="muted">no slot data</span>`; return; }
+  box.innerHTML = "";
+  list.forEach(s => {
+    const el = document.createElement("div");
+    el.className = "slot";
+    let meta, barPct = 0, barColor = "var(--accent)";
+    if (s.state === "prefill") {
+      barPct = (s.prefill_ratio ?? 0) * 100;
+      barColor = "var(--warn)";
+      meta = `prefilling ${s.prompt_processed.toLocaleString()} / ${s.prompt_tokens.toLocaleString()} prompt tokens`;
+    } else if (s.state === "generating") {
+      barPct = (s.ctx_ratio ?? 0) * 100;
+      meta = `prompt ${s.prompt_tokens.toLocaleString()} · generated ${s.decoded.toLocaleString()} · ctx ${(barPct).toFixed(1)}%`;
+    } else {
+      barPct = (s.ctx_ratio ?? 0) * 100;
+      meta = s.ctx_used ? `idle · holds ${s.ctx_used.toLocaleString()} tokens (${barPct.toFixed(1)}% ctx)` : "idle · empty";
+    }
+    el.innerHTML = `
+      <div class="slot-head">
+        <span>Slot ${s.id}</span>
+        <span class="badge ${s.state}">${s.state}</span>
+      </div>
+      <div class="slot-meta">${meta}</div>
+      <div class="bar"><span style="width:${Math.min(barPct,100)}%;background:${barColor}"></span></div>`;
+    box.appendChild(el);
+  });
+}
+
+// Adaptive polling: 1s while generating, slower when idle (and a "lite" poll
+// that only hits /slots) so llama-server's idle loop isn't woken every second.
+const ACTIVE_MS = 1000, IDLE_MS = 3000;
+let lastActive = true;
+
+async function tick() {
+  let active = false;
+  try {
+    const r = await fetch("/api/stats" + (lastActive ? "" : "?lite=1"));
+    const d = await r.json();
+    setStatus(d.online);
+
+    const m = d.model || {};
+    document.getElementById("model").textContent = m.name ? "· " + m.name : "";
+    document.getElementById("s-model").textContent = m.name || "—";
+    document.getElementById("s-ctx").textContent = m.n_ctx ?? "—";
+    const slots = d.slots;
+    document.getElementById("s-slots").textContent =
+      slots ? `${slots.busy} / ${slots.total}` : (m.total_slots ? `0 / ${m.total_slots}` : "—");
+    document.getElementById("s-req").textContent = d.requests ? num(d.requests.processing,0) : "—";
+
+    const kv = d.kv && d.kv.usage_ratio != null ? d.kv.usage_ratio : null;
+    const kvTokens = d.kv && d.kv.tokens != null ? d.kv.tokens : null;
+    document.getElementById("s-kv-pct").textContent = kv != null
+      ? `${(kvTokens ?? 0).toLocaleString()}${m.n_ctx ? " / " + m.n_ctx.toLocaleString() : ""} (${(kv*100).toFixed(1)}%)`
+      : "—";
+    document.getElementById("s-kv-bar").style.width = kv != null ? (kv*100)+"%" : "0";
+
+    const tp = d.throughput || {};
+    // Live decode rate (from /slots, 3-sample smoothed) while generating;
+    // otherwise show the last-request average gauge. Sparkline tracks live.
+    const liveDecode = smoothLive(tp.decode_tps_live ?? null);
+    const decodeShown = liveDecode ?? tp.decode_tps_avg ?? null;
+    document.getElementById("t-decode").textContent = num(decodeShown);
+    document.getElementById("t-pp").textContent = num(tp.pp_tps_avg);
+    document.getElementById("t-decode-avg").textContent = num(tp.decode_tps_avg);
+
+    history.push(liveDecode ?? 0);
+    while (history.length > MAX_PTS) history.shift();
+    renderSpark();
+
+    // Speculative-decode efficiency. Prefer the live per-step figure while
+    // generating; otherwise the exact draft-acceptance stats from the log.
+    const spec = d.spec || {};
+    const tSpec = document.getElementById("t-spec");
+    if (!spec.enabled) {
+      tSpec.textContent = "disabled — MTP not in use";
+      tSpec.style.color = "var(--muted)";
+    } else if (spec.tokens_per_decode != null) {
+      const e = spec.tokens_per_decode;
+      tSpec.textContent = `${e.toFixed(2)} tok/step (live)`;
+      tSpec.style.color = e >= 1.5 ? "var(--good)" : "var(--fg)";
+    } else if (spec.mean_len != null || spec.accept_rate != null) {
+      const parts = [];
+      if (spec.mean_len != null) parts.push(`${spec.mean_len.toFixed(2)} tok/step`);
+      if (spec.accept_rate != null) parts.push(`${(spec.accept_rate*100).toFixed(0)}% accept`);
+      tSpec.textContent = parts.join(" · ") + " (last req)";
+      tSpec.style.color = (spec.mean_len >= 1.5) ? "var(--good)" : "var(--fg)";
+    } else {
+      tSpec.textContent = "MTP on · idle";
+      tSpec.style.color = "var(--muted)";
+    }
+
+    // Last request: exact pp + generation = total time, from the log.
+    const lr = d.last_request || {};
+    const timing = (t, withRate) => t
+      ? `${t.tokens.toLocaleString()} tok · ${t.secs.toFixed(2)}s` +
+        (withRate && t.tps ? ` (${t.tps.toFixed(0)} tok/s)` : "")
+      : "—";
+    document.getElementById("lr-pp").textContent = timing(lr.pp, true);
+    document.getElementById("lr-gen").textContent = timing(lr.generation, true);
+    document.getElementById("lr-total").textContent =
+      lr.total ? `${lr.total.tokens.toLocaleString()} tok · ${lr.total.secs.toFixed(2)}s` : "—";
+
+    renderSplit(d.split || [], d.split_log_configured, d.split_source);
+    renderSlots(d.slots);
+    renderGpus(d.gpu);
+
+    // The backend is authoritative about activity (it watches the log); fall
+    // back to inferring it from the data when that field isn't present.
+    active = (d.active !== undefined) ? !!d.active
+      : !!((slots && slots.busy > 0)
+        || (d.requests && d.requests.processing > 0)
+        || (tp.decode_tps_live > 0));
+
+    if (d.online && d.metrics_enabled === false) {
+      document.getElementById("status").textContent = "online (start llama-server with --metrics for throughput)";
+    }
+    const mode = d.log_mode ? "log" : "http";
+    document.getElementById("updated").textContent =
+      new Date().toLocaleTimeString() + (active ? "" : ` · idle (${mode})`);
+  } catch (e) {
+    setStatus(false);
+  } finally {
+    lastActive = active;
+    setTimeout(tick, active ? ACTIVE_MS : IDLE_MS);
+  }
+}
+
+tick();
+</script>
+<script src="/static/launcher.js"></script>
+</body>
+</html>
