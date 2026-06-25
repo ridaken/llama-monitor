@@ -135,6 +135,24 @@
   /* The flag list has 200+ options, some with long descriptions; cap the select
      so its widest option can't blow out the panel width. */
   .lx-addflag select { flex: 1; min-width: 0; max-width: 520px; }
+  /* Collapsible flags: clickable label + caret, and the read-only summary. */
+  .lx-flags-label { cursor: pointer; user-select: none; }
+  .lx-flags-label:hover { color: var(--fg); }
+  .lx-caret { display: inline-block; width: 10px; color: var(--muted); font-size: 11px; }
+  .lx-flags-summary {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px;
+    cursor: pointer;
+  }
+  .lx-flags-summary:hover { border-color: var(--accent); }
+  .lx-flags-summary .chip {
+    font-size: 12px; color: var(--fg); background: #0d1117;
+    border: 1px solid var(--border); border-radius: 5px; padding: 1px 7px;
+    white-space: nowrap;
+  }
+  .lx-flags-summary .chip .v { color: var(--muted); }
+  .lx-flags-summary .empty { font-size: 12px; color: var(--muted); }
+  .lx-flags-summary .hint { font-size: 11px; color: var(--accent); margin-left: auto; padding-left: 8px; }
   .lx-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
   .lx-spacer { flex: 1; }
   .pill.warn { background: rgba(210,153,34,.18); color: var(--warn); }
@@ -223,12 +241,19 @@
       </div>
 
       <div class="lx-row" style="align-items:flex-start">
-        <span class="lx-label" style="margin-top:6px">Flags</span>
+        <span class="lx-label lx-flags-label" id="lx-flags-label" style="margin-top:6px"
+              title="show/hide the flag editor">
+          <span id="lx-flags-toggle" class="lx-caret">▾</span> Flags</span>
         <div style="flex:1">
-          <div id="lx-flags" class="lx-flags"></div>
-          <div class="lx-addflag" style="margin-top:8px">
-            <select id="lx-flag-pick"></select>
-            <button id="lx-flag-add" class="btn">Add flag</button>
+          <!-- Collapsed: read-only summary of the flags currently set. -->
+          <div id="lx-flags-summary" class="lx-flags-summary" title="expand to edit" hidden></div>
+          <!-- Expanded: the editable flag rows + the add-flag picker. -->
+          <div id="lx-flags-editor">
+            <div id="lx-flags" class="lx-flags"></div>
+            <div class="lx-addflag" style="margin-top:8px">
+              <select id="lx-flag-pick"></select>
+              <button id="lx-flag-add" class="btn">Add flag</button>
+            </div>
           </div>
         </div>
       </div>

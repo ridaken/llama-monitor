@@ -116,6 +116,38 @@
   function renderFlags(flags) {
     $("lx-flags").innerHTML = "";
     (flags || []).forEach((f) => addFlagRow(f.flag, f.value));
+    if (flagsCollapsed()) renderFlagsSummary();   // keep the summary in sync
+  }
+
+  // --- collapse / expand the flags editor -------------------------------- //
+  const FLAGS_COLLAPSED_KEY = "lx-flags-collapsed";
+  const esc = (s) => String(s).replace(/[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function flagsCollapsed() { return $("lx-flags-editor").hidden; }
+
+  // Read-only view of the flags currently set (read from the editor rows, which
+  // stay the source of truth even while hidden). Makes clear you must expand.
+  function renderFlagsSummary() {
+    const box = $("lx-flags-summary");
+    const flags = readFlags();
+    if (!flags.length) {
+      box.innerHTML = `<span class="empty">No flags set</span>` +
+                      `<span class="hint">▸ expand to add</span>`;
+      return;
+    }
+    box.innerHTML = flags.map((f) =>
+      `<span class="chip">${esc(f.flag)}` +
+      (f.value ? ` <span class="v">${esc(f.value)}</span>` : "") + `</span>`
+    ).join("") + `<span class="hint">▸ expand to edit</span>`;
+  }
+
+  function setFlagsCollapsed(collapsed) {
+    $("lx-flags-editor").hidden = collapsed;
+    $("lx-flags-summary").hidden = !collapsed;
+    $("lx-flags-toggle").textContent = collapsed ? "▸" : "▾";
+    if (collapsed) renderFlagsSummary();
+    try { localStorage.setItem(FLAGS_COLLAPSED_KEY, collapsed ? "1" : "0"); } catch (e) { /* ignore */ }
   }
 
   // --- load a config into the form -------------------------------------- //
@@ -510,6 +542,13 @@
     $("lx-flag-add").addEventListener("click", () => {
       addFlagRow($("lx-flag-pick").value, "");
     });
+    // Collapse/expand the flag editor: the label/caret toggles, and clicking the
+    // read-only summary expands straight into the editor.
+    $("lx-flags-label").addEventListener("click", () => setFlagsCollapsed(!flagsCollapsed()));
+    $("lx-flags-summary").addEventListener("click", () => setFlagsCollapsed(false));
+    let startCollapsed = false;
+    try { startCollapsed = localStorage.getItem(FLAGS_COLLAPSED_KEY) === "1"; } catch (e) { /* ignore */ }
+    setFlagsCollapsed(startCollapsed);
     $("lx-config").addEventListener("change", (e) => guardSwitch(e.target.value));
     $("lx-launch").addEventListener("click", doLaunch);
     $("lx-stop").addEventListener("click", doStop);
