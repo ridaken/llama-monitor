@@ -145,7 +145,7 @@
   function setFlagsCollapsed(collapsed) {
     $("lx-flags-editor").hidden = collapsed;
     $("lx-flags-summary").hidden = !collapsed;
-    $("lx-flags-toggle").textContent = collapsed ? "▸" : "▾";
+    $("lx-flags-toggle").classList.toggle("collapsed", collapsed);
     if (collapsed) renderFlagsSummary();
     try { localStorage.setItem(FLAGS_COLLAPSED_KEY, collapsed ? "1" : "0"); } catch (e) { /* ignore */ }
   }
