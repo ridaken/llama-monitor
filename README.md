@@ -64,6 +64,12 @@ load it. If you switch with unsaved edits, you're prompted to **Save**
 (overwrite), **Save as new**, or **Discard**. Everything persists to
 `~/.llama-monitor/state.json`.
 
+**Default configuration.** Click the **★** next to the Configuration dropdown to
+mark the selected config as your default (it's flagged with a ★ in the list).
+When you open the dashboard and **no server is running**, the default config is
+loaded into the form automatically, ready to Launch. Click the ★ again to clear
+it; deleting a config also clears it if it was the default.
+
 > A launched server is left running when you close the dashboard — it's spawned
 > detached, so killing/Ctrl+C-ing the dashboard (or closing its console) does
 > **not** take the server down. Stop it explicitly from the panel. Closing or

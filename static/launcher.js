@@ -145,7 +145,7 @@
   function setFlagsCollapsed(collapsed) {
     $("lx-flags-editor").hidden = collapsed;
     $("lx-flags-summary").hidden = !collapsed;
-    $("lx-flags-toggle").textContent = collapsed ? "▸" : "▾";
+    $("lx-flags-toggle").classList.toggle("collapsed", collapsed);
     if (collapsed) renderFlagsSummary();
     try { localStorage.setItem(FLAGS_COLLAPSED_KEY, collapsed ? "1" : "0"); } catch (e) { /* ignore */ }
   }
@@ -164,6 +164,7 @@
       fillForm(null);
       $("lx-config").value = "";
       setMsg("");
+      renderDefault();
       return;
     }
     const cfg = (LX.state.configs || []).find((c) => c.name === name);
@@ -172,6 +173,7 @@
     fillForm(cfg);
     $("lx-config").value = name;
     setMsg("");
+    renderDefault();
   }
 
   // --- modal helpers ----------------------------------------------------- //
@@ -389,12 +391,39 @@
     const blank = document.createElement("option");
     blank.value = ""; blank.textContent = "— New configuration —";
     sel.appendChild(blank);
+    const def = (LX.state.settings || {}).default_config;
     (LX.state.configs || []).forEach((c) => {
       const o = document.createElement("option");
-      o.value = c.name; o.textContent = c.name;
+      o.value = c.name;
+      o.textContent = (c.name === def ? "★ " : "") + c.name;   // mark the default
       sel.appendChild(o);
     });
     sel.value = keep;
+  }
+  // The ★ toggle: filled/active when the selected config is the default.
+  function renderDefault() {
+    const btn = $("lx-default");
+    const name = $("lx-config").value;
+    const def = ((LX.state && LX.state.settings) || {}).default_config;
+    const isDef = !!name && def === name;
+    btn.textContent = isDef ? "★" : "☆";
+    btn.classList.toggle("active", isDef);
+    btn.disabled = !name;
+    btn.title = !name
+      ? "Select a saved configuration to set it as the default"
+      : isDef
+        ? `Default — "${name}" auto-loads when no server is running (click to unset)`
+        : `Set "${name}" as default (auto-loads when no server is running)`;
+  }
+  async function toggleDefault() {
+    const name = $("lx-config").value;
+    if (!name) { setMsg("Select a saved configuration first.", "bad"); return; }
+    const cur = ((LX.state.settings) || {}).default_config;
+    const next = cur === name ? "" : name;   // clicking the current default clears it
+    try {
+      applyState(await postJSON("/api/configs/default", { name: next }));
+      setMsg(next ? `"${name}" is now the default (auto-loads when idle).` : "Default cleared.", "good");
+    } catch (e) { setMsg("Could not set default: " + e.message, "bad"); }
   }
   function renderBinary() {
     const s = LX.state.settings || {};
@@ -429,6 +458,22 @@
     renderConfigOptions();
     renderBinary();
     renderStatus();
+    renderDefault();
+  }
+
+  // Initial form load: when no server is running, auto-load the default config
+  // (the user's favourite) if one is set and still exists; otherwise blank.
+  function loadInitial() {
+    const st = (LX.state.status) || {};
+    const def = (LX.state.settings || {}).default_config;
+    const exists = def && (LX.state.configs || []).some((c) => c.name === def);
+    if (st.state !== "running" && exists) {
+      loadConfig(def);
+      setMsg(`Loaded default configuration "${def}".`);
+    } else {
+      fillForm(null);
+      renderDefault();
+    }
   }
 
   // --- flag picker ------------------------------------------------------- //
@@ -557,6 +602,7 @@
     $("lx-save").addEventListener("click", doSave);
     $("lx-saveas").addEventListener("click", doSaveAsNew);
     $("lx-delete").addEventListener("click", doDelete);
+    $("lx-default").addEventListener("click", toggleDefault);
     $("lx-modal").addEventListener("click", (e) => {
       if (e.target.id === "lx-modal") closeModal();   // click backdrop to dismiss
     });
@@ -576,7 +622,7 @@
       }
     });
 
-    refresh().then(() => fillForm(null));
+    refresh().then(loadInitial);
     // Poll status so a server that exits on its own (bad flag/OOM) is reflected.
     setInterval(refresh, 3000);
   }

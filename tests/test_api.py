@@ -46,6 +46,31 @@ def test_config_round_trip(client):
     assert after == []
 
 
+def test_default_config_endpoint_sets_and_clears(client):
+    client.post("/api/configs", json={"name": "fav", "model_path": "C:/m.gguf",
+                                       "port": 8001, "flags": []})
+    body = client.post("/api/configs/default", json={"name": "fav"}).json()
+    assert body["settings"]["default_config"] == "fav"
+
+    body = client.post("/api/configs/default", json={"name": ""}).json()
+    assert body["settings"]["default_config"] is None
+
+
+def test_default_config_rejects_unknown(client):
+    r = client.post("/api/configs/default", json={"name": "ghost"})
+    assert r.status_code == 400
+    assert "error" in r.json()
+
+
+def test_deleting_default_config_clears_it(client):
+    client.post("/api/configs", json={"name": "fav", "model_path": "C:/m.gguf",
+                                      "port": 8001, "flags": []})
+    client.post("/api/configs/default", json={"name": "fav"})
+    client.delete("/api/configs/fav")
+    state = client.get("/api/launcher/state").json()
+    assert state["settings"]["default_config"] is None
+
+
 def test_config_save_requires_name(client):
     r = client.post("/api/configs", json={"name": "", "model_path": "C:/m.gguf"})
     assert r.status_code == 400
