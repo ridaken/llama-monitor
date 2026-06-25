@@ -51,6 +51,9 @@ def _default_state() -> dict:
             "llama_server_path": shutil.which("llama-server"),
             "models_dir": None,
             "default_port": DEFAULT_PORT,
+            # Name of the config to auto-load on page open when no server is
+            # running (the user's "default / favourite"). None when unset.
+            "default_config": None,
         },
         "configs": [],
         # The server this dashboard last launched, so a restarted dashboard can
@@ -163,4 +166,20 @@ def upsert_config(config: dict) -> list[dict]:
 def delete_config(name: str) -> list[dict]:
     state = load_state()
     state["configs"] = [c for c in state["configs"] if c.get("name") != name]
+    # A deleted config can't be the default any more.
+    if state["settings"].get("default_config") == name:
+        state["settings"]["default_config"] = None
     return save_state(state)["configs"]
+
+
+def set_default_config(name: Optional[str]) -> dict:
+    """Set (or clear, with a falsy name) the auto-load default config.
+
+    Raises ValueError if a non-empty name doesn't match a saved config.
+    """
+    state = load_state()
+    name = (name or "").strip() or None
+    if name is not None and not any(c.get("name") == name for c in state["configs"]):
+        raise ValueError(f"no such configuration: {name}")
+    state["settings"]["default_config"] = name
+    return save_state(state)["settings"]

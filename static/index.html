@@ -119,6 +119,9 @@
   .btn:hover { border-color: var(--accent); }
   .btn.primary { background: rgba(88,166,255,.15); border-color: var(--accent); color: var(--accent); }
   .btn:disabled { opacity: .4; cursor: not-allowed; }
+  /* default/favourite config toggle (the ★ next to the Configuration dropdown) */
+  .lx-star { padding: 5px 9px; font-size: 14px; line-height: 1; }
+  .lx-star.active { color: var(--warn); border-color: var(--warn); background: rgba(210,153,34,.12); }
   .lx-path { flex: 1; min-width: 200px; word-break: break-all; font-size: 12px; }
   .lx-warn { color: var(--warn); font-style: normal; }
   .note.bad { color: var(--bad); }
@@ -225,6 +228,7 @@
       <div class="lx-row">
         <span class="lx-label">Configuration</span>
         <select id="lx-config"></select>
+        <button id="lx-default" class="btn lx-star" title="Set as default">☆</button>
         <button id="lx-delete" class="btn">Delete</button>
       </div>
 

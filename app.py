@@ -368,6 +368,17 @@ def build_app(args) -> FastAPI:
     def remove_config(name: str) -> JSONResponse:
         return JSONResponse({"configs": store.delete_config(name)})
 
+    @app.post("/api/configs/default")
+    async def post_default_config(request: Request) -> JSONResponse:
+        """Set (or clear, with an empty name) the config that auto-loads on open
+        when no server is running. Returns the full launcher state."""
+        body = await request.json()
+        try:
+            store.set_default_config(body.get("name"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return JSONResponse(launcher_state())
+
     @app.post("/api/launcher/launch")
     async def post_launch(request: Request) -> JSONResponse:
         body = await request.json()

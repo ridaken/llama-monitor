@@ -73,6 +73,23 @@ def test_normalise_recovers_from_corrupt_file(temp_state):
     assert store.get_settings()["default_port"] == store.DEFAULT_PORT
 
 
+def test_default_config_set_clear_and_validate():
+    store.upsert_config({"name": "a", "model_path": "C:/a.gguf", "port": 8001, "flags": []})
+    store.set_default_config("a")
+    assert store.get_settings()["default_config"] == "a"
+    store.set_default_config("")                 # clear
+    assert store.get_settings()["default_config"] is None
+    with pytest.raises(ValueError):              # must reference an existing config
+        store.set_default_config("nope")
+
+
+def test_delete_clears_default():
+    store.upsert_config({"name": "a", "model_path": "C:/a.gguf", "port": 8001, "flags": []})
+    store.set_default_config("a")
+    store.delete_config("a")
+    assert store.get_settings()["default_config"] is None
+
+
 def test_running_record_round_trip(temp_state):
     assert store.get_running() is None              # default
     rec = {"pid": 4321, "port": 9001, "config": {"name": "c1"}}
