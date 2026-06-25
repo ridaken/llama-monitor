@@ -127,10 +127,16 @@
   .note.bad { color: var(--bad); }
   .note.good { color: var(--good); }
   .lx-flags { display: grid; gap: 6px; }
+  /* Cap the flag block so rows don't stretch edge-to-edge on a wide monitor —
+     that left a flag's description floating far to the right, away from its
+     key/value. Keep everything in one readable column instead. */
+  #lx-flags-editor, .lx-flags-summary { max-width: 680px; }
   .lx-flag-row { display: flex; gap: 8px; align-items: center; }
-  .lx-flag-row .lx-flag { width: 130px; flex: none; min-width: 130px; }
-  .lx-flag-row .lx-val { width: 120px; flex: none; min-width: 90px; }
-  .lx-flag-desc { flex: 1; min-width: 140px; color: var(--muted); font-size: 11px;
+  /* The .launcher prefix is needed to out-specify ".launcher input[type=text]"
+     (flex:1; min-width:200px), which otherwise forces these inputs ~200px wide. */
+  .launcher .lx-flag-row .lx-flag { width: 116px; flex: none; min-width: 116px; }
+  .launcher .lx-flag-row .lx-val { width: 92px; flex: none; min-width: 72px; }
+  .lx-flag-desc { flex: 1; min-width: 110px; color: var(--muted); font-size: 11px;
     line-height: 1.3; word-break: break-word; }
   .lx-flag-row .x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 4px; }
   .lx-flag-row .x:hover { color: var(--bad); }
