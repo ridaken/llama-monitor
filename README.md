@@ -61,11 +61,16 @@ load it. If you switch with unsaved edits, you're prompted to **Save**
 (overwrite), **Save as new**, or **Discard**. Everything persists to
 `~/.llama-monitor/state.json`.
 
-> A launched server is left running when you close the dashboard — stop it
-> explicitly from the panel. Single instance: launching replaces any server the
-> panel previously started. Closing or reloading the tab while a server is
-> running pops up a browser confirmation so you don't lose the dashboard by
-> accident; the server keeps running either way.
+> A launched server is left running when you close the dashboard — it's spawned
+> detached, so killing/Ctrl+C-ing the dashboard (or closing its console) does
+> **not** take the server down. Stop it explicitly from the panel. Closing or
+> reloading the tab while a server is running pops up a browser confirmation so
+> you don't lose the dashboard by accident; the server keeps running either way.
+> If you restart the dashboard while a launched server is still running, it
+> **re-adopts** that server automatically (status, monitoring, and Stop/Restart
+> all reconnect) — unless you pass an explicit `--llama-url` (see below), which
+> means "watch exactly this" and takes precedence over re-adoption. Single
+> instance: launching replaces any server the panel previously started.
 
 ## How it gets the data
 
@@ -153,7 +158,7 @@ python app.py --llama-url http://localhost:8001 --llama-log "C:\Users\Tom\Deskto
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--llama-url` | `http://localhost:8080` | Base URL of a server to watch **initially** (overridden when you Launch from the panel) |
+| `--llama-url` | `http://localhost:8080` | Base URL of a server to watch. A non-default value is honored as an explicit "watch this" and takes precedence over re-adopting a panel-launched server; at the default, Launch from the panel retargets monitoring |
 | `--llama-log` | _(none)_ | Path to that server's startup log (enables CPU split) |
 | `--port` | `8500` | Port for this dashboard |
 | `--host` | `127.0.0.1` | Bind address |
