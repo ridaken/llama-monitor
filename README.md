@@ -53,9 +53,13 @@ load it. If you switch with unsaved edits, you're prompted to **Save**
 (overwrite), **Save as new**, or **Discard**. Everything persists to
 `~/.llama-monitor/state.json`.
 
-> A launched server is left running when you close the dashboard — stop it
-> explicitly from the panel. Single instance: launching replaces any server the
-> panel previously started.
+> A launched server is left running when you close the dashboard — it's spawned
+> detached, so killing/Ctrl+C-ing the dashboard (or closing its console) does
+> **not** take the server down. Stop it explicitly from the panel. If you
+> restart the dashboard while a launched server is still running, it
+> **re-adopts** that server automatically (status, monitoring, and Stop/Restart
+> all reconnect). Single instance: launching replaces any server the panel
+> previously started.
 
 ## How it gets the data
 

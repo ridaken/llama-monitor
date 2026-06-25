@@ -53,6 +53,10 @@ def _default_state() -> dict:
             "default_port": DEFAULT_PORT,
         },
         "configs": [],
+        # The server this dashboard last launched, so a restarted dashboard can
+        # re-adopt a still-running server instead of losing track of it. None
+        # when nothing is launched (or after an explicit Stop).
+        "running": None,
     }
 
 
@@ -68,7 +72,10 @@ def _normalise(state: dict) -> dict:
     configs = state.get("configs")
     if not isinstance(configs, list):
         configs = []
-    return {"settings": settings, "configs": configs}
+    running = state.get("running")
+    if not isinstance(running, dict):
+        running = None
+    return {"settings": settings, "configs": configs, "running": running}
 
 
 def load_state() -> dict:
@@ -108,6 +115,22 @@ def update_settings(**changes) -> dict:
         if v is not None:
             state["settings"][k] = v
     return save_state(state)["settings"]
+
+
+# --------------------------------------------------------------------------- #
+# Currently-launched server (survives a dashboard restart)                     #
+# --------------------------------------------------------------------------- #
+
+def get_running() -> Optional[dict]:
+    """The record of the server this dashboard launched, or None."""
+    return load_state().get("running")
+
+
+def set_running(record: Optional[dict]) -> None:
+    """Persist (or clear, with None) the launched-server record."""
+    state = load_state()
+    state["running"] = record if isinstance(record, dict) else None
+    save_state(state)
 
 
 # --------------------------------------------------------------------------- #

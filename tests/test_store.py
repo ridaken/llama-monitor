@@ -71,3 +71,15 @@ def test_normalise_recovers_from_corrupt_file(temp_state):
     # Should fall back to defaults rather than raising.
     assert store.list_configs() == []
     assert store.get_settings()["default_port"] == store.DEFAULT_PORT
+
+
+def test_running_record_round_trip(temp_state):
+    assert store.get_running() is None              # default
+    rec = {"pid": 4321, "port": 9001, "config": {"name": "c1"}}
+    store.set_running(rec)
+    assert store.get_running() == rec
+    # Persisted alongside settings/configs without clobbering them.
+    on_disk = json.loads((temp_state / "state.json").read_text(encoding="utf-8"))
+    assert on_disk["running"]["port"] == 9001
+    store.set_running(None)
+    assert store.get_running() is None

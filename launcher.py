@@ -22,8 +22,38 @@ from typing import Callable, Optional
 
 import store
 
+try:
+    import psutil  # used to re-adopt / stop a server across dashboard restarts
+except Exception:  # pragma: no cover - import guarded so the app still boots
+    psutil = None
+
 # Give a terminated server a moment to exit before escalating to kill.
 _STOP_GRACE_SECS = 5.0
+
+# Spawn the server detached from the dashboard so killing/Ctrl+C-ing the
+# dashboard (or closing its console) does NOT take the server down with it — a
+# plain child shares the parent's console+process group and would receive the
+# same Ctrl+C/close. On Windows: its own process group + no inherited console.
+# On POSIX: its own session (setsid), so it leaves the controlling terminal's
+# signal-delivery group.
+if os.name == "nt":
+    _DETACH_FLAGS = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    _DETACH_KW: dict = {}
+else:
+    _DETACH_FLAGS = 0
+    _DETACH_KW = {"start_new_session": True}
+
+
+def _process_alive(pid: Optional[int]) -> bool:
+    """True if *pid* is a live llama-server process (so we can re-adopt it)."""
+    if psutil is None or not pid:
+        return False
+    try:
+        if not psutil.pid_exists(pid):
+            return False
+        return "llama" in (psutil.Process(pid).name() or "").lower()
+    except Exception:
+        return False
 
 
 class LaunchError(Exception):
@@ -67,6 +97,9 @@ class ServerManager:
         self._retarget = retarget
         self._lock = threading.Lock()
         self._proc: Optional[subprocess.Popen] = None
+        # PID of a server adopted from a previous dashboard run (we have no Popen
+        # handle for it, so it's managed via psutil instead of self._proc).
+        self._adopted_pid: Optional[int] = None
         self.current: Optional[dict] = None   # the config we launched
         self.started_at: Optional[float] = None
         self.exit_code: Optional[int] = None
@@ -82,11 +115,16 @@ class ServerManager:
         if self._proc is not None and self._proc.poll() is not None:
             self.exit_code = self._proc.returncode
             self._proc = None
+        # An adopted server (no Popen handle) that has since died -> forget it
+        # and drop the persisted record so we don't keep reporting "running".
+        if self._adopted_pid is not None and not _process_alive(self._adopted_pid):
+            self._adopted_pid = None
+            store.set_running(None)
 
     def status(self) -> dict:
         with self._lock:
             self._refresh()
-            if self._proc is not None:
+            if self._proc is not None or self._adopted_pid is not None:
                 state = "running"
             elif self._stopped_by_user:
                 state = "stopped"
@@ -97,11 +135,35 @@ class ServerManager:
             return {
                 "state": state,
                 "config_name": (self.current or {}).get("name"),
-                "pid": self._proc.pid if self._proc else None,
+                "pid": self._proc.pid if self._proc else self._adopted_pid,
                 "exit_code": self.exit_code,
                 "started_at": self.started_at,
                 "last_error": self.last_error,
+                "adopted": self._adopted_pid is not None,
             }
+
+    def adopt(self) -> Optional[dict]:
+        """Re-attach to a server launched by a previous dashboard run.
+
+        Reads the persisted record; if its process is still a live llama-server,
+        adopt it (so status reports running and Stop/Restart work) and return the
+        record so the caller can repoint monitoring. Otherwise clear the stale
+        record and return None.
+        """
+        rec = store.get_running()
+        if not rec:
+            return None
+        pid = rec.get("pid")
+        if not _process_alive(pid):
+            store.set_running(None)
+            return None
+        with self._lock:
+            self.current = rec.get("config")
+            self.started_at = rec.get("started_at")
+            self._adopted_pid = pid
+            self.exit_code = None
+            self._stopped_by_user = False
+        return rec
 
     # -- argv --------------------------------------------------------------- #
 
@@ -146,7 +208,7 @@ class ServerManager:
 
         with self._lock:
             self._refresh()
-            if self._proc is not None:
+            if self._proc is not None or self._adopted_pid is not None:
                 self._stop_locked()
             store._ensure_dir()
             # Truncate the managed log so the tailer starts clean for this run.
@@ -160,6 +222,8 @@ class ServerManager:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     cwd=os.path.dirname(binary) or None,
+                    creationflags=_DETACH_FLAGS,
+                    **_DETACH_KW,
                 )
             except Exception as e:
                 self._proc = None
@@ -171,6 +235,14 @@ class ServerManager:
             self.exit_code = None
             self.last_error = None
             self._stopped_by_user = False
+            # Persist so a restarted dashboard can re-adopt this server.
+            store.set_running({
+                "pid": self._proc.pid,
+                "port": port,
+                "config": config,
+                "started_at": self.started_at,
+                "log_path": store.MANAGED_LOG,
+            })
 
         # Repoint the dashboard at the freshly launched server.
         self._retarget(f"http://127.0.0.1:{port}", store.MANAGED_LOG, port)
@@ -180,24 +252,42 @@ class ServerManager:
         with self._lock:
             self._stop_locked()
             self._stopped_by_user = True
+            store.set_running(None)
         return self.status()
 
     def _stop_locked(self) -> None:
         proc = self._proc
-        if proc is None:
+        if proc is not None:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=_STOP_GRACE_SECS)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=_STOP_GRACE_SECS)
+            except Exception as e:
+                self.last_error = str(e)
+            finally:
+                self.exit_code = proc.returncode
+                self._proc = None
+            return
+        # No Popen handle (a server adopted from a previous run): stop via psutil.
+        if self._adopted_pid is not None:
+            self._stop_pid(self._adopted_pid)
+            self._adopted_pid = None
+
+    def _stop_pid(self, pid: int) -> None:
+        if psutil is None:
             return
         try:
-            proc.terminate()
+            p = psutil.Process(pid)
+            p.terminate()
             try:
-                proc.wait(timeout=_STOP_GRACE_SECS)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=_STOP_GRACE_SECS)
+                p.wait(timeout=_STOP_GRACE_SECS)
+            except Exception:
+                p.kill()
         except Exception as e:
             self.last_error = str(e)
-        finally:
-            self.exit_code = proc.returncode
-            self._proc = None
 
     def restart(self) -> dict:
         if self.current is None:
