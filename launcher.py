@@ -61,13 +61,17 @@ class LaunchError(Exception):
 
 
 def _flag_tokens(flags: list[dict]) -> list[str]:
-    """Expand [{flag, value}, ...] into a flat argv list.
+    """Expand [{flag, value, enabled?}, ...] into a flat argv list.
 
     A blank/missing value yields a bare switch (e.g. ``--mlock``); otherwise the
-    value follows as its own token (e.g. ``-c 86000``).
+    value follows as its own token (e.g. ``-c 86000``). An entry with
+    ``enabled`` explicitly ``False`` is skipped entirely (the UI's per-flag
+    toggle for quick A/B tests); a missing/``True`` ``enabled`` is included.
     """
     out: list[str] = []
     for f in flags or []:
+        if f.get("enabled") is False:
+            continue
         flag = (f.get("flag") or "").strip()
         if not flag:
             continue

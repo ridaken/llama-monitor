@@ -51,6 +51,16 @@ def test_upsert_creates_then_overwrites_by_name():
     assert configs[0]["port"] == 9000
 
 
+def test_config_with_disabled_flag_roundtrips():
+    """The optional per-flag `enabled` key is stored verbatim (absent = on)."""
+    store.upsert_config({"name": "cfg", "model_path": "C:/a.gguf", "port": 8001,
+                         "flags": [{"flag": "-c", "value": "4096"},
+                                   {"flag": "--mlock", "value": "", "enabled": False}]})
+    flags = store.get_config("cfg")["flags"]
+    assert flags[0] == {"flag": "-c", "value": "4096"}       # untouched, no key added
+    assert flags[1]["enabled"] is False                      # toggle state survives
+
+
 def test_upsert_requires_name():
     with pytest.raises(ValueError):
         store.upsert_config({"name": "", "model_path": "C:/a.gguf"})

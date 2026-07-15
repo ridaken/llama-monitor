@@ -127,7 +127,13 @@
   .note.bad { color: var(--bad); }
   .note.good { color: var(--good); }
   .lx-flags { display: grid; gap: 6px; }
-  .lx-flag-row { display: flex; gap: 8px; align-items: center; }
+  /* Controls (enable toggle, flag, value, remove) cluster on the LEFT so the ×
+     never drifts far from the inputs on a wide monitor; the description fills the
+     rest. padding+negative margin gives a hover highlight with no layout shift. */
+  .lx-flag-row { display: flex; gap: 8px; align-items: center;
+    padding: 2px 4px; margin: 0 -4px; border-radius: 5px; }
+  .lx-flag-row:hover { background: rgba(88,166,255,.06); }
+  .lx-flag-row .lx-en { flex: none; accent-color: var(--accent); cursor: pointer; margin: 0; }
   /* Size the key/value columns as a share of the row so they scale with the
      window across resolutions instead of being fixed px, with px floors/ceilings
      to stay sensible at the extremes. The .launcher prefix out-specifies
@@ -137,12 +143,31 @@
   .launcher .lx-flag-row .lx-val  { flex: 0 0 9%;  min-width: 84px;  max-width: 160px; }
   .lx-flag-desc { flex: 1 1 auto; min-width: 160px; color: var(--muted); font-size: 11px;
     line-height: 1.3; word-break: break-word; }
-  .lx-flag-row .x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 4px; }
+  .lx-flag-row .x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 4px; flex: none; }
   .lx-flag-row .x:hover { color: var(--bad); }
+  /* A flag toggled off: dim its inputs/description, but keep the checkbox and ×
+     full-opacity so re-enabling / removing it stays obvious. */
+  .lx-flag-row.disabled .lx-flag,
+  .lx-flag-row.disabled .lx-val,
+  .lx-flag-row.disabled .lx-flag-desc { opacity: .45; }
   .lx-addflag { display: flex; gap: 8px; align-items: center; }
-  /* The flag list has 200+ options, some with long descriptions; cap the select
-     so its widest option can't blow out the panel width. */
-  .lx-addflag select { flex: 1; min-width: 0; max-width: 520px; }
+  /* Combobox flag picker: a filterable text input + an absolutely-positioned
+     dropdown of matches (the flag list has 200+ entries). max-width keeps the
+     widest option from blowing out the panel. */
+  .lx-combo { position: relative; flex: 1; min-width: 0; max-width: 520px; }
+  .lx-combo input { width: 100%; box-sizing: border-box; }
+  .lx-combo-list {
+    position: absolute; z-index: 60; top: calc(100% + 4px); left: 0; right: 0;
+    max-height: 320px; overflow: auto; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  }
+  .lx-combo-list[hidden] { display: none; }
+  .lx-combo-item { padding: 5px 10px; cursor: pointer; font-size: 12px; }
+  .lx-combo-item .f { color: var(--fg); }
+  .lx-combo-item .d { color: var(--muted); font-size: 11px; }
+  .lx-combo-item.sel, .lx-combo-item:hover { background: #1c2128; }
+  .lx-combo-empty { padding: 5px 10px; color: var(--muted); font-size: 11px; cursor: default; }
   /* Collapsible flags: clickable label + chevron, and the read-only summary. */
   .lx-flags-label {
     cursor: pointer; user-select: none; display: inline-flex; align-items: center;
@@ -161,15 +186,30 @@
     padding: 7px 9px; border: 1px dashed var(--border); border-radius: 6px;
     cursor: pointer;
   }
+  /* The [hidden] attribute alone is overridden by display:flex above, which left
+     the collapsed summary (e.g. "No flags set") visible next to the expanded
+     editor. Restore hidden's intent explicitly. */
+  .lx-flags-summary[hidden] { display: none; }
   .lx-flags-summary:hover { border-color: var(--accent); }
   .lx-flags-summary .chip {
     font-size: 12px; color: var(--fg); background: #0d1117;
     border: 1px solid var(--border); border-radius: 5px; padding: 1px 7px;
     white-space: nowrap;
   }
+  .lx-flags-summary .chip.disabled { opacity: .5; text-decoration: line-through; }
   .lx-flags-summary .chip .v { color: var(--muted); }
   .lx-flags-summary .empty { font-size: 12px; color: var(--muted); }
   .lx-flags-summary .hint { font-size: 11px; color: var(--accent); margin-left: auto; padding-left: 8px; }
+  /* Unsaved-change indicators: a warm tint + left rule on any row/flag-row that
+     differs from the loaded (saved) baseline, an asterisk by the config select,
+     and an emphasised Save button. */
+  .lx-row.dirty, .lx-flag-row.dirty {
+    background: rgba(210,153,34,.08); box-shadow: inset 2px 0 0 var(--warn);
+  }
+  .lx-flags-label.dirty, .lx-flags-summary.dirty { box-shadow: inset 2px 0 0 var(--warn); }
+  .lx-dirty-mark { color: var(--warn); font-weight: 700; font-size: 15px; }
+  .lx-dirty-mark[hidden] { display: none; }
+  #lx-save.dirty { border-color: var(--warn); color: var(--warn); }
   .lx-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
   .lx-spacer { flex: 1; }
   .pill.warn { background: rgba(210,153,34,.18); color: var(--warn); }
@@ -242,6 +282,7 @@
       <div class="lx-row">
         <span class="lx-label">Configuration</span>
         <select id="lx-config"></select>
+        <span id="lx-dirty-mark" class="lx-dirty-mark" title="unsaved changes" hidden>*</span>
         <button id="lx-default" class="btn lx-star" title="Set as default">☆</button>
         <button id="lx-delete" class="btn">Delete</button>
       </div>
@@ -274,9 +315,18 @@
           <div id="lx-flags-editor">
             <div id="lx-flags" class="lx-flags"></div>
             <div class="lx-addflag" style="margin-top:8px">
-              <select id="lx-flag-pick"></select>
+              <div class="lx-combo" id="lx-flag-combo">
+                <input id="lx-flag-pick" type="text" autocomplete="off" spellcheck="false"
+                       placeholder="type to search flags, or enter a custom flag"
+                       role="combobox" aria-expanded="false" aria-autocomplete="list"
+                       aria-controls="lx-flag-list" />
+                <div id="lx-flag-list" class="lx-combo-list" role="listbox" hidden></div>
+              </div>
               <button id="lx-flag-add" class="btn">Add flag</button>
             </div>
+            <div id="lx-flags-src" class="note" hidden>Showing a small bundled flag
+              list — set a valid llama-server path above to load the full list for
+              your build.</div>
           </div>
         </div>
       </div>
