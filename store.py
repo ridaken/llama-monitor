@@ -15,6 +15,11 @@ Shape::
       ]
     }
 
+Each flag is ``{"flag": ..., "value": ..., "enabled"?: bool}``. ``enabled`` is
+optional: absent (or ``true``) means the flag is passed at launch; ``false``
+means the UI has toggled it off, so it is stored but skipped when building argv
+(see :func:`launcher._flag_tokens`).
+
 ``--metrics`` and ``--log-file`` are intentionally *not* stored in ``flags`` —
 they are injected by the launcher at known values. ``port`` is its own field so
 it can never be removed.

@@ -46,6 +46,17 @@ def test_config_round_trip(client):
     assert after == []
 
 
+def test_config_round_trip_preserves_disabled_flag(client):
+    cfg = {"name": "toggled", "model_path": "C:/m.gguf", "port": 8001,
+           "flags": [{"flag": "-c", "value": "4096"},
+                     {"flag": "-fa", "value": "on", "enabled": False}]}
+    assert client.post("/api/configs", json=cfg).status_code == 200
+
+    listed = client.get("/api/configs").json()["configs"]
+    saved = next(c for c in listed if c["name"] == "toggled")
+    assert saved["flags"][1]["enabled"] is False
+
+
 def test_default_config_endpoint_sets_and_clears(client):
     client.post("/api/configs", json={"name": "fav", "model_path": "C:/m.gguf",
                                        "port": 8001, "flags": []})

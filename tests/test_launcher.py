@@ -28,6 +28,31 @@ def test_flag_tokens_bare_switch_vs_valued():
     assert _flag_tokens(flags) == ["-c", "4096", "--mlock", "-fa", "on"]
 
 
+def test_flag_tokens_skips_disabled():
+    """A per-flag toggle: enabled is False -> skipped; absent/True -> kept."""
+    flags = [
+        {"flag": "-c", "value": "4096", "enabled": True},   # explicit on
+        {"flag": "-fa", "value": "on", "enabled": False},   # valued, off
+        {"flag": "--mlock", "value": "", "enabled": False}, # bare switch, off
+        {"flag": "-ngl", "value": "99"},                    # key absent -> on
+    ]
+    assert _flag_tokens(flags) == ["-c", "4096", "-ngl", "99"]
+
+
+def test_build_argv_excludes_disabled_flags():
+    mgr = ServerManager(lambda *a: None)
+    cfg = {"model_path": "C:/m/model.gguf", "port": 8001,
+           "flags": [{"flag": "-c", "value": "86000"},
+                     {"flag": "--no-mmap", "value": "", "enabled": False}]}
+    argv = mgr.build_argv(cfg, "llama-server")
+
+    assert "-c" in argv and "86000" in argv
+    assert "--no-mmap" not in argv                # disabled -> not launched
+    # Managed flags still appended last so they win.
+    assert "--metrics" in argv
+    assert argv[-2:] == ["--log-file", store.MANAGED_LOG]
+
+
 def test_build_argv_injects_managed_flags_last():
     mgr = ServerManager(lambda *a: None)
     cfg = {"model_path": "C:/m/model.gguf", "port": 8001,

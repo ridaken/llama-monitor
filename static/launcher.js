@@ -46,7 +46,12 @@
     $("lx-flags").querySelectorAll(".lx-flag-row").forEach((row) => {
       const flag = row.querySelector(".lx-flag").value.trim();
       const value = row.querySelector(".lx-val").value.trim();
-      if (flag) flags.push({ flag, value });
+      if (!flag) return;
+      const rec = { flag, value };
+      // Only record enabled when the flag is toggled OFF; omitting it when on
+      // keeps re-saving an untouched (legacy) config byte-identical.
+      if (!row.querySelector(".lx-en").checked) rec.enabled = false;
+      flags.push(rec);
     });
     return flags;
   }
@@ -65,8 +70,11 @@
       name: (cfg.name || "").trim(),
       model_path: (cfg.model_path || "").trim(),
       port: cfg.port == null || cfg.port === "" ? null : Number(cfg.port),
+      // Normalise enabled on BOTH sides (default = enabled) so a legacy config
+      // with no `enabled` key compares clean against a form row whose box is on.
       flags: (cfg.flags || []).map((f) => ({ flag: (f.flag || "").trim(),
-                                             value: (f.value || "").trim() })),
+                                             value: (f.value || "").trim(),
+                                             enabled: f.enabled !== false })),
     });
   }
   function isDirty() {
@@ -75,10 +83,55 @@
     // No saved config loaded: dirty only if the user has entered something.
     return !!(cur.model_path || cur.name || cur.flags.length);
   }
+
+  // Paint the per-row unsaved-change indicators (warm tint) and the global marks
+  // (asterisk by the config select + emphasised Save) by comparing the live form
+  // against the loaded baseline — or, with nothing loaded, the blank-form values
+  // fillForm(null) produces (empty model/name, the default port).
+  function updateDirtyUI() {
+    const settings = (LX.state && LX.state.settings) || {};
+    const defPort = Number(settings.default_port || 8001);
+    const b = LX.loaded;
+
+    const baseModel = b ? (b.model_path || "").trim() : "";
+    const baseName = b ? (b.name || "").trim() : "";
+    const basePort = b && b.port != null && b.port !== "" ? Number(b.port) : defPort;
+    const curModel = $("lx-model").value.trim();
+    const curName = $("lx-name").value.trim();
+    const curPort = $("lx-port").value === "" ? defPort : Number($("lx-port").value);
+
+    $("lx-model").closest(".lx-row").classList.toggle("dirty", curModel !== baseModel);
+    $("lx-name").closest(".lx-row").classList.toggle("dirty", curName !== baseName);
+    $("lx-port").closest(".lx-row").classList.toggle("dirty", curPort !== basePort);
+
+    // Per flag-row positional compare against the baseline's flags (order matters
+    // in argv, so a reorder is legitimately dirty).
+    const baseFlags = (b && b.flags) || [];
+    $("lx-flags").querySelectorAll(".lx-flag-row").forEach((row, i) => {
+      const flag = row.querySelector(".lx-flag").value.trim();
+      const value = row.querySelector(".lx-val").value.trim();
+      const enabled = row.querySelector(".lx-en").checked;
+      const bf = baseFlags[i];
+      const clean = !!bf && (bf.flag || "").trim() === flag &&
+        (bf.value || "").trim() === value && (bf.enabled !== false) === enabled;
+      row.classList.toggle("dirty", !clean);
+    });
+
+    // Whole-array mismatch also tints the flags label/summary — this covers
+    // deleted rows (which have no element to mark) and the collapsed view.
+    const flagsDirty = canon({ flags: readFlags() }) !== canon({ flags: baseFlags });
+    $("lx-flags-label").classList.toggle("dirty", flagsDirty);
+    $("lx-flags-summary").classList.toggle("dirty", flagsDirty);
+
+    const dirty = isDirty();
+    $("lx-dirty-mark").hidden = !dirty;
+    $("lx-save").classList.toggle("dirty", dirty);
+  }
   // Default config name: alias flag (-a/--alias) value, else the .gguf basename.
   function defaultName() {
     const flags = readFlags();
-    const alias = flags.find((f) => f.flag === "-a" || f.flag === "--alias");
+    const alias = flags.find((f) => (f.flag === "-a" || f.flag === "--alias") &&
+                                    f.enabled !== false);
     if (alias && alias.value) return alias.value;
     const base = basename($("lx-model").value.trim());
     return base.replace(/\.gguf$/i, "");
@@ -88,14 +141,18 @@
   function flagInfo(flag) {
     return FLAG_INDEX[(flag || "").trim()] || null;
   }
-  function addFlagRow(flag = "", value = "") {
+  function addFlagRow(flag = "", value = "", enabled = true) {
     const row = document.createElement("div");
     row.className = "lx-flag-row";
+    // Controls cluster on the left (toggle, flag, value, ×); the description
+    // fills the rest — so the × stays next to the inputs on wide monitors.
     row.innerHTML =
+      `<input class="lx-en" type="checkbox" title="include this flag when launching" />` +
       `<input class="lx-flag" type="text" placeholder="flag" />` +
       `<input class="lx-val" type="text" placeholder="value" />` +
-      `<span class="lx-flag-desc"></span>` +
-      `<button class="x" title="remove">×</button>`;
+      `<button class="x" title="remove">×</button>` +
+      `<span class="lx-flag-desc"></span>`;
+    const enEl = row.querySelector(".lx-en");
     const flagEl = row.querySelector(".lx-flag");
     const valEl = row.querySelector(".lx-val");
     const descEl = row.querySelector(".lx-flag-desc");
@@ -106,16 +163,23 @@
       descEl.textContent = info ? info.desc : "";
       valEl.placeholder = info && info.value_hint ? info.value_hint : "value";
     };
+    const syncEnabled = () => row.classList.toggle("disabled", !enEl.checked);
+    enEl.checked = enabled !== false;
     flagEl.value = flag;
     valEl.value = value;
     flagEl.addEventListener("input", sync);
-    row.querySelector(".x").addEventListener("click", () => row.remove());
+    enEl.addEventListener("change", syncEnabled);
+    row.querySelector(".x").addEventListener("click", () => {
+      row.remove();
+      updateDirtyUI();       // the delegated listener won't fire for a removed row
+    });
     $("lx-flags").appendChild(row);
     sync();
+    syncEnabled();
   }
   function renderFlags(flags) {
     $("lx-flags").innerHTML = "";
-    (flags || []).forEach((f) => addFlagRow(f.flag, f.value));
+    (flags || []).forEach((f) => addFlagRow(f.flag, f.value, f.enabled !== false));
     if (flagsCollapsed()) renderFlagsSummary();   // keep the summary in sync
   }
 
@@ -137,7 +201,7 @@
       return;
     }
     box.innerHTML = flags.map((f) =>
-      `<span class="chip">${esc(f.flag)}` +
+      `<span class="chip${f.enabled === false ? " disabled" : ""}">${esc(f.flag)}` +
       (f.value ? ` <span class="v">${esc(f.value)}</span>` : "") + `</span>`
     ).join("") + `<span class="hint">▸ expand to edit</span>`;
   }
@@ -165,6 +229,7 @@
       $("lx-config").value = "";
       setMsg("");
       renderDefault();
+      updateDirtyUI();
       return;
     }
     const cfg = (LX.state.configs || []).find((c) => c.name === name);
@@ -174,6 +239,7 @@
     $("lx-config").value = name;
     setMsg("");
     renderDefault();
+    updateDirtyUI();
   }
 
   // --- modal helpers ----------------------------------------------------- //
@@ -295,6 +361,7 @@
     renderConfigOptions();
     LX.loaded = JSON.parse(JSON.stringify(cfg));
     $("lx-config").value = cfg.name;
+    updateDirtyUI();       // saved -> baseline now matches the form (no longer dirty)
     return true;
   }
   async function doSave() {
@@ -366,6 +433,9 @@
     try {
       const res = await postJSON("/api/launcher/settings", { llama_server_path: picked });
       applyState(res);
+      // Re-parse the new binary's --help so the flag list reflects this build
+      // (rather than a stale/bundled list from when the path was invalid).
+      loadFlags();
       setMsg("llama-server path updated.", "good");
     } catch (e) { setMsg("Could not set path: " + e.message, "bad"); }
   }
@@ -461,38 +531,154 @@
     renderDefault();
   }
 
-  // Initial form load: when no server is running, auto-load the default config
-  // (the user's favourite) if one is set and still exists; otherwise blank.
-  function loadInitial() {
+  // Find the saved config that best matches a running server's model: first by
+  // an enabled -a/--alias flag equal to the reported name, then by the model
+  // file's basename (case-insensitive, for Windows paths).
+  function findConfigForModel(configs, m) {
+    const name = (m.name || "").trim();
+    const base = (p) => basename(p || "").toLowerCase();
+    if (name) {
+      const byAlias = (configs || []).find((c) => (c.flags || []).some((f) =>
+        (f.flag === "-a" || f.flag === "--alias") && f.enabled !== false &&
+        (f.value || "").trim() === name));
+      if (byAlias) return byAlias;
+    }
+    if (m.path) {
+      const byPath = (configs || []).find((c) => base(c.model_path) === base(m.path));
+      if (byPath) return byPath;
+    }
+    return null;
+  }
+
+  // Initial form load:
+  //  * Server running & launched by us  -> load the config it was launched with
+  //    (status.config_name), so reopening the page restores that config.
+  //  * Server running, no name match    -> match the live model by alias / file.
+  //  * Idle                             -> auto-load the default/favourite config.
+  async function loadInitial() {
     const st = (LX.state.status) || {};
+    const configs = LX.state.configs || [];
+
+    if (st.state === "running") {
+      const byName = st.config_name && configs.find((c) => c.name === st.config_name);
+      if (byName) {
+        loadConfig(byName.name);
+        setMsg(`Loaded "${byName.name}" (running server).`);
+        return;
+      }
+      // No launched-config record (e.g. an externally started / adopted server):
+      // match the live model reported by /api/stats.
+      try {
+        const stats = await getJSON("/api/stats?lite=1");
+        const match = findConfigForModel(LX.state.configs || [], stats.model || {});
+        if (match) {
+          loadConfig(match.name);
+          setMsg(`Loaded "${match.name}" (matches the running model).`);
+          return;
+        }
+      } catch (e) { /* server unreachable -> fall through to a blank form */ }
+      fillForm(null);
+      renderDefault();
+      updateDirtyUI();
+      return;
+    }
+
+    // Idle: auto-load the default/favourite config if it still exists.
     const def = (LX.state.settings || {}).default_config;
-    const exists = def && (LX.state.configs || []).some((c) => c.name === def);
-    if (st.state !== "running" && exists) {
+    if (def && configs.some((c) => c.name === def)) {
       loadConfig(def);
       setMsg(`Loaded default configuration "${def}".`);
     } else {
       fillForm(null);
       renderDefault();
+      updateDirtyUI();
     }
   }
 
-  // --- flag picker ------------------------------------------------------- //
-  function renderFlagPicker() {
-    const sel = $("lx-flag-pick");
-    sel.innerHTML = "";
-    const custom = document.createElement("option");
-    custom.value = ""; custom.textContent = "— custom flag —";
-    sel.appendChild(custom);
-    FLAG_LIST.forEach((f) => {
-      const o = document.createElement("option");
-      o.value = f.flags[0];
-      const hint = f.value_hint ? " " + f.value_hint : "";
-      // Truncate the dropdown label; the full description still shows in the row.
-      const short = f.desc && f.desc.length > 90 ? f.desc.slice(0, 89) + "…" : f.desc;
-      const desc = short ? " — " + short : "";
-      o.textContent = `${f.flags.join(", ")}${hint}${desc}`;
-      sel.appendChild(o);
-    });
+  // --- combobox flag picker ---------------------------------------------- //
+  // A filterable text input + dropdown replacing the 200+-option <select>: type
+  // to narrow by a "contains" match over aliases and descriptions, keyboard
+  // navigate, and still add any custom (unlisted) flag by typing it.
+  const COMBO_CAP = 50;                 // most matches shown at once
+  let comboItems = [];                  // the currently-filtered FLAG_LIST slice
+  let comboSel = -1;                    // highlighted index (-1 = none)
+
+  function comboOpen() { return !$("lx-flag-list").hidden; }
+
+  function filterFlags(q) {
+    q = (q || "").trim().toLowerCase();
+    if (!q) return FLAG_LIST.slice(0, COMBO_CAP);
+    const pre = [], aliasHit = [], descHit = [];
+    for (const f of FLAG_LIST) {
+      const aliases = (f.flags || []).map((a) => a.toLowerCase());
+      const stripped = aliases.map((a) => a.replace(/^-+/, ""));
+      if (stripped.some((a) => a.startsWith(q)) || aliases.some((a) => a.startsWith(q)))
+        pre.push(f);
+      else if (aliases.some((a) => a.includes(q))) aliasHit.push(f);
+      else if ((f.desc || "").toLowerCase().includes(q)) descHit.push(f);
+      if (pre.length >= COMBO_CAP) break;
+    }
+    return pre.concat(aliasHit, descHit).slice(0, COMBO_CAP);
+  }
+
+  function renderComboList() {
+    const box = $("lx-flag-list");
+    if (!comboItems.length) {
+      box.innerHTML = `<div class="lx-combo-empty">no matches — “Add flag” inserts it as a custom flag</div>`;
+      return;
+    }
+    box.innerHTML = comboItems.map((f, i) => {
+      const hint = f.value_hint ? " " + esc(f.value_hint) : "";
+      const short = f.desc && f.desc.length > 90 ? f.desc.slice(0, 89) + "…" : (f.desc || "");
+      const desc = short ? ` <span class="d">— ${esc(short)}</span>` : "";
+      return `<div class="lx-combo-item${i === comboSel ? " sel" : ""}" role="option" data-i="${i}">` +
+             `<span class="f">${esc(f.flags.join(", "))}${hint}</span>${desc}</div>`;
+    }).join("");
+  }
+
+  function openCombo() {
+    comboItems = filterFlags($("lx-flag-pick").value);
+    comboSel = comboItems.length ? 0 : -1;
+    renderComboList();
+    $("lx-flag-list").hidden = false;
+    $("lx-flag-pick").setAttribute("aria-expanded", "true");
+  }
+  function closeCombo() {
+    $("lx-flag-list").hidden = true;
+    $("lx-flag-pick").setAttribute("aria-expanded", "false");
+  }
+  function moveCombo(delta) {
+    if (!comboItems.length) return;
+    comboSel = (comboSel + delta + comboItems.length) % comboItems.length;
+    renderComboList();
+    const el = $("lx-flag-list").querySelector(".lx-combo-item.sel");
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }
+  // Add a flag row from a picked FLAG_LIST entry (single gesture: pick -> row).
+  function pickComboItem(i) {
+    const f = comboItems[i];
+    if (!f) return;
+    addFlagRow(f.flags[0], "");
+    $("lx-flag-pick").value = "";
+    closeCombo();
+    $("lx-flag-pick").focus();
+    updateDirtyUI();
+  }
+  // Resolve the raw typed text to a flag: exact known alias as-is, else try the
+  // --/- prefixed forms, else add it verbatim as a custom flag.
+  function addFromCombo() {
+    const raw = $("lx-flag-pick").value.trim();
+    if (!raw) return;
+    let flag = raw;
+    if (!flagInfo(raw)) {
+      if (flagInfo("--" + raw)) flag = "--" + raw;
+      else if (flagInfo("-" + raw)) flag = "-" + raw;
+    }
+    addFlagRow(flag, "");
+    $("lx-flag-pick").value = "";
+    closeCombo();
+    $("lx-flag-pick").focus();
+    updateDirtyUI();
   }
 
   // Sort key: the long flag (--…) if present, else the first alias, stripped of
@@ -505,7 +691,7 @@
   async function loadFlags() {
     let data;
     try { data = await getJSON("/api/launcher/flags"); }
-    catch (e) { data = { flags: [] }; }
+    catch (e) { data = { flags: [], source: "bundled" }; }
     const list = (data && data.flags) || [];
 
     for (const k in FLAG_INDEX) delete FLAG_INDEX[k];
@@ -516,7 +702,10 @@
     });
     FLAG_LIST = list.filter((f) => f.flags && f.flags.length)
                     .sort((a, b) => flagSortKey(a).localeCompare(flagSortKey(b)));
-    renderFlagPicker();
+
+    // Warn when we're on the small bundled fallback (binary path unset/invalid)
+    // rather than the full list parsed from the user's build.
+    $("lx-flags-src").hidden = ((data && data.source) || "bundled") === "help";
 
     // Backfill descriptions on rows rendered before the flags arrived.
     $("lx-flags").querySelectorAll(".lx-flag").forEach((el) =>
@@ -584,9 +773,35 @@
 
     $("lx-bin-browse").addEventListener("click", changeBinary);
     $("lx-model-browse").addEventListener("click", changeModel);
-    $("lx-flag-add").addEventListener("click", () => {
-      addFlagRow($("lx-flag-pick").value, "");
+
+    // Combobox flag picker.
+    $("lx-flag-add").addEventListener("click", addFromCombo);
+    const pick = $("lx-flag-pick");
+    pick.addEventListener("input", () => { openCombo(); });
+    pick.addEventListener("focus", () => { openCombo(); });
+    pick.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") { if (!comboOpen()) openCombo(); else moveCombo(1); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { moveCombo(-1); e.preventDefault(); }
+      else if (e.key === "Enter") {
+        e.preventDefault();
+        if (comboOpen() && comboSel >= 0) pickComboItem(comboSel);
+        else addFromCombo();
+      } else if (e.key === "Escape") { closeCombo(); }
     });
+    pick.addEventListener("blur", () => closeCombo());
+    // Select on mousedown (before blur) + preventDefault so the input keeps focus
+    // and the pick lands — the classic combobox blur-vs-click fix, no timers.
+    $("lx-flag-list").addEventListener("mousedown", (e) => {
+      const item = e.target.closest(".lx-combo-item");
+      if (!item) return;               // clicking the empty-state row: ignore
+      e.preventDefault();
+      pickComboItem(Number(item.dataset.i));
+    });
+
+    // Recompute the unsaved-change indicators on any form edit. `change` (not
+    // just `input`) is needed for the flag enable checkboxes.
+    $("lx-body").addEventListener("input", updateDirtyUI);
+    $("lx-body").addEventListener("change", updateDirtyUI);
     // Collapse/expand the flag editor: the label/caret toggles, and clicking the
     // read-only summary expands straight into the editor.
     $("lx-flags-label").addEventListener("click", () => setFlagsCollapsed(!flagsCollapsed()));
@@ -611,12 +826,11 @@
       if (e.target.id === "console-modal") closeConsole();
     });
 
-    // Warn before closing/reloading while a dashboard-launched server is running.
-    // The server is intentionally left running either way — this is just a guard
-    // against losing the dashboard by accident.
+    // Warn before closing/reloading only when there are unsaved configuration
+    // edits. A launched server is intentionally left running either way (it's a
+    // detached process), so a running server alone is not a reason to warn.
     window.addEventListener("beforeunload", (e) => {
-      const st = LX.state && LX.state.status;
-      if (st && st.state === "running") {
+      if (isDirty()) {
         e.preventDefault();
         e.returnValue = "";   // required for the native confirmation to show
       }
