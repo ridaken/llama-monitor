@@ -130,6 +130,22 @@ def test_missing_file_closes_open_generation_and_recovers(tmp_path):
     assert len(db.list()["items"]) == 2
 
 
+def test_replaced_file_with_reused_inode_is_detected(tmp_path, monkeypatch):
+    # Some filesystems reuse the inode immediately after unlink/recreate.
+    monkeypatch.setattr(LogFollower, "_key", staticmethod(lambda stat: "same-inode"))
+    path, db, follower = make(tmp_path)
+    path.write_text("slot launch_slot: id 0 | processing task 1\n", encoding="utf-8")
+    follower.poll()
+    os.unlink(path)
+    follower.poll()
+    path.write_text(generation(slot=1), encoding="utf-8")
+    follower.poll()
+    rows = db.list()["items"]
+    assert len(rows) == 2
+    assert {r["slot_id"] for r in rows} == {0, 1}
+    assert db.get_cursor(str(path))["offset"] == path.stat().st_size
+
+
 def test_failed_commit_retries_same_lines(tmp_path, monkeypatch):
     path, db, follower = make(tmp_path)
     path.write_text(generation(), encoding="utf-8")

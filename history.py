@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import json
 import os
 import re
@@ -85,7 +86,9 @@ class HistoryDB:
                     file_key TEXT NOT NULL,
                     offset INTEGER NOT NULL,
                     run_id TEXT NOT NULL,
-                    gap INTEGER NOT NULL DEFAULT 0
+                    gap INTEGER NOT NULL DEFAULT 0,
+                    head_len INTEGER NOT NULL DEFAULT 0,
+                    head_hash TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS prompt_files (
                     id TEXT PRIMARY KEY,
@@ -111,6 +114,11 @@ class HistoryDB:
             """)
             if "gap" not in {row["name"] for row in db.execute("PRAGMA table_info(cursors)")}:
                 db.execute("ALTER TABLE cursors ADD COLUMN gap INTEGER NOT NULL DEFAULT 0")
+            cursor_columns = {row["name"] for row in db.execute("PRAGMA table_info(cursors)")}
+            if "head_len" not in cursor_columns:
+                db.execute("ALTER TABLE cursors ADD COLUMN head_len INTEGER NOT NULL DEFAULT 0")
+            if "head_hash" not in cursor_columns:
+                db.execute("ALTER TABLE cursors ADD COLUMN head_hash TEXT NOT NULL DEFAULT ''")
             if "prompts_cleared_at" not in {row["name"] for row in db.execute("PRAGMA table_info(runs)")}:
                 db.execute("ALTER TABLE runs ADD COLUMN prompts_cleared_at REAL")
 
@@ -130,6 +138,23 @@ class HistoryDB:
         with self.connect() as db:
             row = db.execute("SELECT * FROM cursors WHERE path = ?", (path,)).fetchone()
             return dict(row) if row else None
+
+    @staticmethod
+    def _head(path: str, length: int) -> Optional[tuple[int, str]]:
+        try:
+            with open(path, "rb") as f:
+                data = f.read(min(length, 4096))
+            return len(data), hashlib.sha256(data).hexdigest()
+        except OSError:
+            return None
+
+    @classmethod
+    def head_matches(cls, path: str, cursor: dict) -> bool:
+        length = cursor.get("head_len") or 0
+        if not length:
+            return True
+        head = cls._head(path, length)
+        return head is not None and head[0] == length and head[1] == cursor["head_hash"]
 
     def ensure_run(self, run_id: str, source: str, started_at: float) -> None:
         with self.connect() as db:
@@ -163,15 +188,23 @@ class HistoryDB:
         names = ", ".join(columns)
         marks = ", ".join("?" for _ in columns)
         updates = ", ".join(f"{col}=excluded.{col}" for col in columns[1:])
+        head = self._head(path, offset)
         with self.connect() as db:
+            if head is None:
+                previous = db.execute("SELECT file_key, head_len, head_hash FROM cursors "
+                                      "WHERE path = ?", (path,)).fetchone()
+                head = (previous["head_len"], previous["head_hash"]) if previous and \
+                    previous["file_key"] == file_key else (0, "")
             for row in rows:
                 db.execute(f"INSERT INTO generations({names}) VALUES({marks}) "
                            f"ON CONFLICT(id) DO UPDATE SET {updates}",
                            [row.get(col) for col in columns])
-            db.execute("INSERT INTO cursors(path, file_key, offset, run_id, gap) VALUES(?, ?, ?, ?, ?) "
+            db.execute("INSERT INTO cursors(path, file_key, offset, run_id, gap, head_len, head_hash) "
+                       "VALUES(?, ?, ?, ?, ?, ?, ?) "
                        "ON CONFLICT(path) DO UPDATE SET file_key=excluded.file_key, "
-                       "offset=excluded.offset, run_id=excluded.run_id, gap=excluded.gap",
-                       (path, file_key, offset, run_id, int(gap)))
+                       "offset=excluded.offset, run_id=excluded.run_id, gap=excluded.gap, "
+                       "head_len=excluded.head_len, head_hash=excluded.head_hash",
+                       (path, file_key, offset, run_id, int(gap), *head))
 
     def latest_by_slot(self, run_id: str) -> dict[int, dict]:
         with self.connect() as db:
@@ -406,12 +439,13 @@ class LogFollower:
             if run_id:
                 self.run_id = run_id
                 if previous and previous["run_id"] == run_id and stat and \
-                        previous["file_key"] == self.file_key and previous["offset"] <= stat.st_size:
+                        previous["file_key"] == self.file_key and previous["offset"] <= stat.st_size \
+                        and self.db.head_matches(self.path, previous):
                     self.offset = previous["offset"]
                 elif previous and previous["run_id"] == run_id and stat:
                     self.gap = True
             elif previous and stat and previous["file_key"] == self.file_key and \
-                    previous["offset"] <= stat.st_size:
+                    previous["offset"] <= stat.st_size and self.db.head_matches(self.path, previous):
                 self.run_id = previous["run_id"]
                 self.offset = previous["offset"]
             else:
@@ -621,7 +655,8 @@ class LogFollower:
                     self.offset = stat.st_size
                     self._scan_metadata()
                 self.db.save_batch(self.path, key, self.offset, self.run_id, [], self.gap)
-            elif self.file_key != key or stat.st_size < self.offset:
+            elif self.file_key != key or stat.st_size < self.offset or not \
+                    self.db.head_matches(self.path, self.db.get_cursor(self.path) or {}):
                 self.gap = True
                 new_segment = True
                 self._close_running()
