@@ -438,7 +438,7 @@ def build_app(args) -> FastAPI:
         # no-store so the browser always loads the current JS (otherwise a stale
         # cached page keeps the old polling behaviour after an upgrade).
         return FileResponse(
-            os.path.join(STATIC_DIR, "index.html"),
+            os.path.join(STATIC_DIR, "app", "index.html"),
             headers={"Cache-Control": "no-store"},
         )
 

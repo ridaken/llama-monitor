@@ -36,6 +36,16 @@ def test_launcher_state_shape(client):
     assert body["status"]["state"] == "stopped"
 
 
+def test_python_server_serves_built_react_ui(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "<div id=\"root\"></div>" in response.text
+    assert "/static/app/assets/" in response.text
+    assert response.headers["cache-control"] == "no-store"
+    asset = response.text.split('/static/app/assets/')[1].split('"')[0]
+    assert client.get('/static/app/assets/' + asset).status_code == 200
+
+
 def test_history_api_filters_and_clear(client, tmp_path):
     db = HistoryDB(str(tmp_path / "history.sqlite"))
     db.ensure_run("api-run", "external", 1)

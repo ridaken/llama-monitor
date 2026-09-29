@@ -1,6 +1,8 @@
 # llama-monitor
 
-A single-screen local web dashboard for a `llama.cpp` / `llama-server` session.
+A local web dashboard for a `llama.cpp` / `llama-server` session, with a React and
+shadcn/ui interface. The **Monitor**, **Manage**, and **History** views keep live
+status visible while you move between them.
 It can **launch and manage** llama-server for you (browse to a `.gguf`, set
 flags, Launch / Stop / Restart, and save/load named configurations), and shows,
 live (1s refresh):
@@ -31,7 +33,7 @@ Designed to run on the **same machine** as llama-server and the GPUs.
 
 ## Launch & manage llama-server
 
-The **Launch / manage** panel at the top of the dashboard runs llama-server for
+The **Manage** view runs llama-server for
 you, so you don't need a separate launch script:
 
 - **Pick the binary** — the path to `llama-server` is auto-detected from your
@@ -44,7 +46,7 @@ you, so you don't need a separate launch script:
   alphabetised), or type any flag/value by hand. Each known flag shows a
   description next to it — whether picked from the dropdown or typed as a custom
   flag — and its value hint becomes the input placeholder. The Flags section
-  **collapses** (click the `▾ Flags` label) to free up dashboard space; collapsed
+  **collapses** (click the Flags label) to free up dashboard space; collapsed
   it shows the currently-set flags as a read-only list — expand it to edit. The
   collapsed/expanded choice is remembered across sessions.
 - **Console** — the **Console** button opens a live, auto-scrolling view of
@@ -68,7 +70,7 @@ load it. If you switch with unsaved edits, you're prompted to **Save**
 (overwrite), **Save as new**, or **Discard**. Everything persists to
 `~/.llama-monitor/state.json`.
 
-**Default configuration.** Click the **★** next to the Configuration dropdown to
+**Default configuration.** Click **Set default** next to the Configuration dropdown to
 mark the selected config as your default (it's flagged with a ★ in the list).
 When you open the dashboard and **no server is running**, the default config is
 loaded into the form automatically, ready to Launch. Click the ★ again to clear
@@ -76,9 +78,9 @@ it; deleting a config also clears it if it was the default.
 
 > A launched server is left running when you close the dashboard — it's spawned
 > detached, so killing/Ctrl+C-ing the dashboard (or closing its console) does
-> **not** take the server down. Stop it explicitly from the panel. Closing or
-> reloading the tab while a server is running pops up a browser confirmation so
-> you don't lose the dashboard by accident; the server keeps running either way.
+> **not** take the server down. Stop it explicitly from Manage. Closing or
+> reloading the tab prompts only when configuration edits are unsaved; the server
+> keeps running either way.
 > If you restart the dashboard while a launched server is still running, it
 > **re-adopts** that server automatically (status, monitoring, and Stop/Restart
 > all reconnect) — unless you pass an explicit `--llama-url` (see below), which
@@ -135,7 +137,7 @@ file is unavailable, it **falls back** to HTTP adaptive polling (1 s active /
 
 ## Activity history
 
-Open **Activity history** in the header to filter by model, state, or date and
+Open **History** in the navigation to filter by model, state, or date and
 sort by time, total duration, prompt tokens, or generated tokens. Each record
 shows its run, slot, and task when known. Missing timing lines remain marked
 **incomplete**; timing lines without a slot are **ambiguous** and are never
@@ -183,8 +185,20 @@ python app.py
 # open http://localhost:8500
 ```
 
-Then use the **Launch / manage** panel to start llama-server (see above). That's
+Then use the **Manage** view to start llama-server (see above). That's
 the simplest path — the panel sets `--metrics` and `--log-file` for you.
+
+The built React interface is included in `static/app`, so running the dashboard
+requires only the Python dependencies above. To develop or rebuild the UI, use
+Node.js and pnpm:
+
+```powershell
+cd frontend
+pnpm install --frozen-lockfile
+pnpm dev        # UI at http://127.0.0.1:5173; run python app.py separately for /api
+pnpm build      # writes the committed assets in ../static/app
+pnpm test:e2e   # Chromium browser tests against an isolated FastAPI instance
+```
 
 ### Watching a server you started yourself (optional)
 
