@@ -17,6 +17,8 @@ live (1s refresh):
 - **System memory** — system RAM used/total with a sparkline, plus the
   llama-server process's resident set size (where a model spills over when it
   doesn't fit in VRAM)
+- **Activity history** — sortable, filterable generations observed in the log,
+  retained in local SQLite until you clear them
 
 ### Speculative decoding (MTP / draft)
 
@@ -55,7 +57,9 @@ you, so you don't need a separate launch script:
 
 llama-monitor **injects three flags** at known values so monitoring works:
 `--port <your port>`, `--metrics`, and `--log-file` (pointed at
-`~/.llama-monitor/llama-server.log`). You don't set these yourself.
+`~/.llama-monitor/llama-server.log`). When the installed binary advertises
+`--log-jsonl` and `--log-timestamps`, it enables those too. Older binaries keep
+using text logs. You don't set these yourself.
 
 **Save / load configurations.** A saved config is the model path + your flags +
 the port, stored under a name (defaults to the `-a`/`--alias` value, else the
@@ -86,13 +90,14 @@ it; deleting a config also clears it if it was the default.
 | Data | Source |
 |------|--------|
 | Model / ctx / slots | llama-server `GET /props`, `/v1/models`, `/slots` |
-| pp & decode TPS, KV usage | llama-server `GET /metrics` (needs `--metrics`) |
+| pp & decode TPS gauges, request counts | llama-server `GET /metrics` (needs `--metrics`) |
+| Per-generation timings and history | text or JSONL server log, stored in SQLite |
 | GPU temp/util/power/VRAM | NVML (`nvidia-ml-py`) |
 | System RAM + llama-server RSS | `psutil` |
 | Console output | the server's log file, tailed |
 | Supported flags + descriptions | parsed from `llama-server --help` |
 | GPU portion of the split | NVML per-process VRAM, matched to the llama-server PID |
-| CPU portion of the split | parsed once from llama-server's startup log (optional) |
+| CPU portion of the split | parsed from llama-server's startup log (optional) |
 
 llama.cpp has no runtime "GB per device" API, so the GPU split is read live from
 NVML per-process memory, and the CPU/system-RAM portion is read from the startup
@@ -115,11 +120,52 @@ polling** while idle:
   **exact** prefill/decode tok/s and speculative-decode acceptance (more precise
   than the `/metrics` gauges).
 
+One background reader ingests complete log lines about once per second. The
+dashboard uses its activity signal, memory startup data, and saved generations;
+opening or closing a browser tab does not affect collection. The `/metrics`
+throughput values are scrape-window gauges, while the **Last request** timings
+come from the newest complete observed generation. The dashboard also shows
+the current deferred-request count from `/metrics`.
+
 The log parsing is intentionally tolerant (matches short, stable substrings and
 treats any unrecognised growth as activity). If no `--llama-log` is set, or the
-markers can't be found, it **falls back** to HTTP adaptive polling (1 s active /
+file is unavailable, it **falls back** to HTTP adaptive polling (1 s active /
 3 s idle, with a lightweight `/slots`-only idle poll). The header shows
 `idle (log)` or `idle (http)` so you can see which mode is active.
+
+## Activity history
+
+Open **Activity history** in the header to filter by model, state, or date and
+sort by time, total duration, prompt tokens, or generated tokens. Each record
+shows its run, slot, and task when known. Missing timing lines remain marked
+**incomplete**; timing lines without a slot are **ambiguous** and are never
+combined with another slot's timings. Log unavailability or rotation can cause
+a visible coverage gap. External logs start recording when first attached,
+from the current end of the file.
+
+For managed launches, enable **Save prompts in Activity history** in the
+configuration, then relaunch the server. When its binary supports
+`--log-prompts-dir`, llama-monitor reads the prompt files and saves their text
+in SQLite. Select **View prompt** in a history row to read it. The native files
+contain the server's rendered prompt, which may include private text; they are
+not copies of the full HTTP request. They do not contain responses or task IDs.
+If simultaneous requests cannot be linked to timing rows with confidence,
+their prompts appear as separate **Prompt only** entries. External servers can
+use `--llama-prompts-dir` to point llama-monitor at an existing prompt directory.
+
+History is stored at `~/.llama-monitor/history.sqlite` using SQLite WAL mode.
+There is no automatic expiry or row limit; **Clear history…** deletes saved
+generation and prompt records after confirmation, removes managed prompt files,
+and keeps the current log cursor so old lines do not reappear. External prompt
+files and the raw server log retain their existing lifecycles. JSONL currently
+wraps ordinary server messages, so history does not claim to include every HTTP
+request, status code, or response body.
+
+For local integrations, `GET /api/history` accepts `model`, `state`, `from_ts`,
+`to_ts`, `sort` (`time`, `duration`, `prompt_tokens`, `generated_tokens`),
+`order` (`asc` or `desc`), `limit`, and an opaque `cursor` returned as
+`next_cursor`. `DELETE /api/history` clears saved generations while retaining
+the log cursor. `GET /api/history/{id}/prompt` returns saved text when available.
 
 ## Setup
 
@@ -169,10 +215,11 @@ python app.py --llama-url http://localhost:8001 --llama-log "C:\Users\Tom\Deskto
 |------|---------|---------|
 | `--llama-url` | `http://localhost:8080` | Base URL of a server to watch. A non-default value is honored as an explicit "watch this" and takes precedence over re-adopting a panel-launched server; at the default, Launch from the panel retargets monitoring |
 | `--llama-log` | _(none)_ | Path to that server's startup log (enables CPU split) |
+| `--llama-prompts-dir` | _(none)_ | Directory written by an external server's `--log-prompts-dir` flag |
 | `--port` | `8500` | Port for this dashboard |
 | `--host` | `127.0.0.1` | Bind address |
 
-Env vars `LLAMA_URL`, `LLAMA_LOG`, `MONITOR_PORT` are also honored.
+Env vars `LLAMA_URL`, `LLAMA_LOG`, `LLAMA_PROMPTS_DIR`, and `MONITOR_PORT` are also honored.
 
 ## Notes
 

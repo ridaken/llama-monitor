@@ -3,6 +3,7 @@ cover the new launcher/config/browse surface end-to-end (minus actually
 spawning a server). State is redirected to a temp file."""
 
 import argparse
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 import app as app_module
 import launcher
 import store
+from history import HistoryDB
 
 
 @pytest.fixture
@@ -32,6 +34,60 @@ def test_launcher_state_shape(client):
     body = r.json()
     assert set(["settings", "binary_valid", "configs", "status", "managed_log"]) <= body.keys()
     assert body["status"]["state"] == "stopped"
+
+
+def test_history_api_filters_and_clear(client, tmp_path):
+    db = HistoryDB(str(tmp_path / "history.sqlite"))
+    db.ensure_run("api-run", "external", 1)
+    db.save_batch(str(tmp_path / "server.log"), "key", 100, "api-run", [{
+        "id": "g1", "run_id": "api-run", "model": "test-model", "slot_id": 2,
+        "observed_at": 10, "completed_at": 11, "state": "complete",
+        "prompt_tokens": 12, "generated_tokens": 5, "total_seconds": 1.2,
+    }])
+    body = client.get("/api/history", params={"model": "test-model", "state": "complete"}).json()
+    assert body["items"][0]["id"] == "g1"
+    assert body["models"] == ["test-model"]
+    assert body["database_path"] == str(tmp_path / "history.sqlite")
+    assert client.get("/api/history", params={"sort": "invalid"}).status_code == 400
+    assert client.delete("/api/history").json()["deleted"] == 1
+    assert client.get("/api/history").json()["items"] == []
+    assert db.get_cursor(str(tmp_path / "server.log"))["offset"] == 100
+
+
+def test_history_prompt_detail_and_prompt_only_filter(client, tmp_path):
+    db = HistoryDB(str(tmp_path / "history.sqlite"))
+    db.ensure_run("prompt-api-run", "external", 1)
+    db.add_prompt_file("prompt-api-run", str(tmp_path / "000000000001.txt"),
+                       10, "private prompt text", False)
+    row = client.get("/api/history", params={"state": "prompt_only"}).json()["items"][0]
+    assert row["has_prompt"] == 1
+    assert client.get(f"/api/history/{row['id']}/prompt").json()["prompt_text"] == "private prompt text"
+    client.delete("/api/history")
+    assert client.get(f"/api/history/{row['id']}/prompt").status_code == 404
+
+
+def test_console_decodes_jsonl_and_resumes_at_byte_offset(client):
+    with open(store.MANAGED_LOG, "wb") as f:
+        f.write((json.dumps({"type": "log", "msg": "server ready"}) + "\n").encode())
+    first = client.get("/api/launcher/console").json()
+    assert first["content"] == "server ready\n"
+    with open(store.MANAGED_LOG, "ab") as f:
+        f.write((json.dumps({"type": "log", "msg": "request done"}) + "\n").encode())
+    second = client.get("/api/launcher/console", params={"offset": first["offset"]}).json()
+    assert second["content"] == "request done\n"
+
+
+def test_no_log_uses_http_idle_fallback(client, monkeypatch):
+    levels = []
+    def fake_collect(self, level="full"):
+        levels.append(level)
+        return {"online": False, "slots": {"busy": 0, "total": 0, "list": []},
+                "requests": {"processing": 0, "deferred": 0}}
+    monkeypatch.setattr(app_module.LlamaCollector, "collect", fake_collect)
+    body = client.get("/api/stats", params={"lite": 1}).json()
+    assert levels == ["slots"]
+    assert body["log_mode"] is False
+    assert body["log_status"]["configured"] is False
 
 
 def test_config_round_trip(client):

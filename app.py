@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import os
 import string
-import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -30,13 +29,10 @@ import store
 from collectors import (
     GpuCollector,
     LlamaCollector,
-    LogTailer,
     collect_sysmem,
     find_llama_pids,
-    parse_device_baseline,
-    parse_device_split,
-    parse_spec_enabled,
 )
+from history import HistoryDB, LogFollower, decode_log_line
 from launcher import LaunchError, ServerManager, resolve_binary
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -77,35 +73,43 @@ def build_app(args) -> FastAPI:
 
     # The monitored target lives in a mutable holder so launching a server can
     # repoint the collectors at runtime (they're rebuilt fresh, not mutated, so
-    # all of LlamaCollector's cached state and the tailer's position reset
-    # cleanly on a model swap). The CLI args are just the initial target.
+    # all of LlamaCollector's cached state resets on a model swap.
+    db = HistoryDB(os.path.join(store.HOME_DIR, "history.sqlite"))
+    follower = LogFollower(db, args.llama_log,
+                           prompt_dir=getattr(args, "llama_prompts_dir", None))
     rt = {
         "llama": LlamaCollector(args.llama_url),
-        "tailer": LogTailer(args.llama_log),
         "log_path": args.llama_log,
         "port": urlparse(args.llama_url).port,
     }
-    state = {"active": False}
+    state = {"active": False, "activity_seq": follower.snapshot()["activity_seq"]}
 
-    # Log-derived values are re-parsed at most every 10s so a model swap /
-    # server restart is picked up without re-reading the file on every poll.
-    log_cache = {"ts": 0.0, "split": {}, "baseline": {}, "spec": False}
+    def managed_prompt_dir(config: dict) -> str | None:
+        if config.get("log_prompts"):
+            return store.PROMPTS_DIR
+        for entry in config.get("flags") or []:
+            if entry.get("enabled") is not False and entry.get("flag") == "--log-prompts-dir":
+                return entry.get("value") or None
+        return None
 
     def retarget(url: str, log_path: str, port: int) -> None:
         """Point the dashboard's collectors at a (newly launched) server."""
         old = rt["llama"]
         rt["llama"] = LlamaCollector(url)
-        rt["tailer"] = LogTailer(log_path)
+        record = store.get_running()
+        follower.attach(log_path, run_id=(record or {}).get("run_id"), managed=True,
+                        started_at=(record or {}).get("started_at"),
+                        prompt_dir=managed_prompt_dir((record or {}).get("config") or {}))
         rt["log_path"] = log_path
         rt["port"] = port
         state["active"] = False
-        log_cache["ts"] = 0.0  # force a fresh split/spec parse from the new log
+        state["activity_seq"] = follower.snapshot()["activity_seq"]
         try:
             old.close()
         except Exception:
             pass
 
-    manager = ServerManager(retarget)
+    manager = ServerManager(retarget, finish_log=follower.finish_segment)
 
     # If a previous dashboard run launched a server that's still alive, re-adopt
     # it and point monitoring at it — so killing and relaunching the dashboard
@@ -125,26 +129,17 @@ def build_app(args) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Startup happens above (collector construction); only teardown is needed.
+        follower.start()
         # A launched llama-server is intentionally left running — the user stops
         # it explicitly from the UI.
         try:
             yield
         finally:
+            follower.stop()
             rt["llama"].close()
             gpu.shutdown()
 
     app = FastAPI(title="llama-monitor", lifespan=lifespan)
-
-    def from_log() -> dict:
-        now = time.time()
-        log_path = rt["log_path"]
-        if log_path and now - log_cache["ts"] > 10:
-            log_cache["split"] = parse_device_split(log_path)
-            log_cache["baseline"] = parse_device_baseline(log_path)
-            log_cache["spec"] = parse_spec_enabled(log_path)
-            log_cache["ts"] = now
-        return log_cache
 
     def collect_gated(lite: int):
         """Choose how hard to poll llama-server.
@@ -154,9 +149,10 @@ def build_app(args) -> FastAPI:
         again. Without a log: the old HTTP adaptive behaviour (frontend lite).
         """
         llama = rt["llama"]
-        tailer = rt["tailer"]
-        if tailer.ok:
-            saw = tailer.poll()  # True / False / None
+        snapshot = follower.snapshot()
+        if snapshot["available"]:
+            saw = snapshot["activity_seq"] != state["activity_seq"]
+            state["activity_seq"] = snapshot["activity_seq"]
             if saw:
                 state["active"] = True
             data = llama.collect("full" if state["active"] else "none")
@@ -172,33 +168,30 @@ def build_app(args) -> FastAPI:
             data["log_mode"] = False
         data["active"] = state["active"]
 
-        # Merge exact per-request stats parsed from the log (preferred over the
-        # HTTP gauges/approximations) when available.
-        L = tailer.last
-        if L.get("prefill"):
-            data["prefill_last"] = L["prefill"]
-        if L.get("decode") and data.get("throughput"):
-            data["throughput"]["decode_tps_avg"] = L["decode"]["tps"]
-        # Exact timing breakdown of the most recent completed request:
-        # prompt-processing (pp) + generation = total, straight from the log's
-        # print_timing block. (Generation is reasoning + answer combined — the
-        # server doesn't time those separately.)
-        last_req = {}
-        if L.get("prefill"):
-            last_req["pp"] = L["prefill"]
-        if L.get("decode"):
-            last_req["generation"] = L["decode"]
-        if L.get("total"):
-            last_req["total"] = L["total"]
-        if last_req:
-            data["last_request"] = last_req
-        if L.get("draft"):
+        data["log_status"] = {k: snapshot[k] for k in ("available", "configured", "gap", "error")}
+        follower.set_model((data.get("model") or {}).get("name"))
+        last = db.latest_complete(snapshot["run_id"])
+        if last:
+            def timing(tokens, seconds, *, decode=False):
+                # llama-server counts the first generated token in the total
+                # but excludes it from its printed eval tokens/second rate.
+                rate_tokens = max(0, tokens - 1) if decode and tokens is not None else tokens
+                return {"tokens": tokens, "secs": seconds,
+                        "tps": rate_tokens / seconds if rate_tokens is not None
+                        and seconds and seconds > 0 else None}
+            pp = timing(last["prompt_tokens"], last["prompt_seconds"])
+            dec = timing(last["generated_tokens"], last["decode_seconds"], decode=True)
+            total_tokens = (last["prompt_tokens"] or 0) + (last["generated_tokens"] or 0)
+            total = timing(total_tokens, last["total_seconds"])
+            data["prefill_last"] = pp
+            data["last_request"] = {"pp": pp, "generation": dec, "total": total}
+        if last and last.get("draft_generated") is not None:
             sp = data.setdefault("spec", {})
             sp["enabled"] = True
-            sp["accept_rate"] = L["draft"].get("rate")
-            sp["mean_len"] = L["draft"].get("mean_len")
-            sp["accepted"] = L["draft"].get("accepted")
-            sp["generated"] = L["draft"].get("generated")
+            sp["accept_rate"] = last["draft_accept_rate"]
+            sp["mean_len"] = last["draft_mean_len"]
+            sp["accepted"] = last["draft_accepted"]
+            sp["generated"] = last["draft_generated"]
         return data
 
     @app.get("/api/stats")
@@ -224,7 +217,7 @@ def build_app(args) -> FastAPI:
         if nvml_split:
             split, source = nvml_split, "nvml"
         elif log_path:
-            cache = from_log()
+            cache = follower.snapshot()
             if cache["split"]:
                 for label, mib in cache["split"].items():
                     split.append(_seg(label, int(mib * MIB)))
@@ -239,10 +232,35 @@ def build_app(args) -> FastAPI:
         # Idle-time MTP detection from the log complements the collector's latch
         # (which can only fire once a request has actually used speculation).
         if log_path and not (data.get("spec") or {}).get("enabled"):
-            if from_log()["spec"]:
+            if follower.snapshot()["spec"]:
                 data.setdefault("spec", {})["enabled"] = True
 
         return JSONResponse(data)
+
+    @app.get("/api/history")
+    def get_history(model: str = "", state: str = "", from_ts: float | None = None,
+                    to_ts: float | None = None, sort: str = "time", order: str = "desc",
+                    cursor: str | None = None, limit: int = 50) -> JSONResponse:
+        try:
+            result = db.list(model=model, state=state, from_ts=from_ts, to_ts=to_ts,
+                             sort=sort, order=order, cursor=cursor, limit=limit)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        result["database_path"] = db.path
+        result["log_status"] = {k: follower.snapshot()[k] for k in
+                                ("available", "configured", "gap", "error", "prompts_configured")}
+        return JSONResponse(result)
+
+    @app.delete("/api/history")
+    def delete_history() -> JSONResponse:
+        return JSONResponse({"deleted": follower.clear_history()})
+
+    @app.get("/api/history/{activity_id}/prompt")
+    def get_history_prompt(activity_id: str) -> JSONResponse:
+        prompt = db.get_prompt(activity_id)
+        if prompt is None:
+            return JSONResponse({"error": "Prompt unavailable"}, status_code=404)
+        return JSONResponse(prompt)
 
     # ----------------------------------------------------------------------- #
     # Launcher / configuration API                                            #
@@ -278,7 +296,7 @@ def build_app(args) -> FastAPI:
         """Stream the active server log (console output) incrementally.
 
         Reads the currently-monitored log (the managed log for launched servers,
-        or the watched ``--llama-log`` for an external one). Mirrors the tailer's
+        or the watched ``--llama-log`` for an external one). Mirrors the follower's
         truncation handling so a restart/rotation re-reads from the top.
         """
         path = rt["log_path"] or store.MANAGED_LOG
@@ -291,10 +309,24 @@ def build_app(args) -> FastAPI:
                 start = 0
             if start == 0 and size > CONSOLE_HEAD:
                 start = size - CONSOLE_HEAD
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(path, "rb") as f:
                 f.seek(start)
-                content = f.read()
-                new_offset = f.tell()
+                if start and offset == 0:
+                    f.readline()  # drop a partial first line after a bounded tail
+                first_complete = f.tell()
+                raw = f.read()
+                end = raw.rfind(b"\n")
+                if end < 0:
+                    raw = b""
+                    new_offset = first_complete
+                else:
+                    raw = raw[:end + 1]
+                    new_offset = first_complete + end + 1
+            content = "\n".join(decode_log_line(line.decode("utf-8", "replace")) or
+                                line.decode("utf-8", "replace").strip()
+                                for line in raw.splitlines())
+            if raw.endswith(b"\n") and content:
+                content += "\n"
         except Exception as e:
             return JSONResponse({"available": False, "error": str(e), "content": "",
                                  "offset": offset, "size": 0, "path": path})
@@ -427,6 +459,11 @@ def main() -> None:
         "--llama-log",
         default=os.environ.get("LLAMA_LOG"),
         help="Path to a running llama-server's startup log (for the CPU split number)",
+    )
+    p.add_argument(
+        "--llama-prompts-dir",
+        default=os.environ.get("LLAMA_PROMPTS_DIR"),
+        help="Directory written by an external server's --log-prompts-dir flag",
     )
     p.add_argument(
         "--port",

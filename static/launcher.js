@@ -60,6 +60,7 @@
       name: $("lx-name").value.trim(),
       model_path: $("lx-model").value.trim(),
       port: $("lx-port").value === "" ? null : Number($("lx-port").value),
+      log_prompts: $("lx-log-prompts").checked,
       flags: readFlags(),
     };
   }
@@ -70,6 +71,7 @@
       name: (cfg.name || "").trim(),
       model_path: (cfg.model_path || "").trim(),
       port: cfg.port == null || cfg.port === "" ? null : Number(cfg.port),
+      log_prompts: !!cfg.log_prompts,
       // Normalise enabled on BOTH sides (default = enabled) so a legacy config
       // with no `enabled` key compares clean against a form row whose box is on.
       flags: (cfg.flags || []).map((f) => ({ flag: (f.flag || "").trim(),
@@ -81,7 +83,7 @@
     const cur = readForm();
     if (LX.loaded) return canon(cur) !== canon(LX.loaded);
     // No saved config loaded: dirty only if the user has entered something.
-    return !!(cur.model_path || cur.name || cur.flags.length);
+    return !!(cur.model_path || cur.name || cur.flags.length || cur.log_prompts);
   }
 
   // Paint the per-row unsaved-change indicators (warm tint) and the global marks
@@ -103,6 +105,8 @@
     $("lx-model").closest(".lx-row").classList.toggle("dirty", curModel !== baseModel);
     $("lx-name").closest(".lx-row").classList.toggle("dirty", curName !== baseName);
     $("lx-port").closest(".lx-row").classList.toggle("dirty", curPort !== basePort);
+    $("lx-log-prompts").closest(".lx-row").classList.toggle("dirty",
+      $("lx-log-prompts").checked !== !!(b && b.log_prompts));
 
     // Per flag-row positional compare against the baseline's flags (order matters
     // in argv, so a reorder is legitimately dirty).
@@ -219,6 +223,7 @@
     const settings = (LX.state && LX.state.settings) || {};
     $("lx-model").value = (cfg && cfg.model_path) || "";
     $("lx-port").value = (cfg && cfg.port) || settings.default_port || 8001;
+    $("lx-log-prompts").checked = !!(cfg && cfg.log_prompts);
     $("lx-name").value = (cfg && cfg.name) || "";
     renderFlags((cfg && cfg.flags) || []);
   }

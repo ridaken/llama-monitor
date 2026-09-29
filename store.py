@@ -37,6 +37,7 @@ HOME_DIR = os.path.join(os.path.expanduser("~"), ".llama-monitor")
 STATE_PATH = os.path.join(HOME_DIR, "state.json")
 # The log file llama-monitor tells launched servers to write (and then tails).
 MANAGED_LOG = os.path.join(HOME_DIR, "llama-server.log")
+PROMPTS_DIR = os.path.join(HOME_DIR, "prompts")
 
 DEFAULT_PORT = 8001
 

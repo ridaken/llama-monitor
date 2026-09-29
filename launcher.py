@@ -18,9 +18,11 @@ import shutil
 import subprocess
 import threading
 import time
+import uuid
 from typing import Callable, Optional
 
 import store
+import flags as flags_mod
 
 try:
     import psutil  # used to re-adopt / stop a server across dashboard restarts
@@ -96,9 +98,11 @@ def resolve_binary(path: Optional[str]) -> Optional[str]:
 class ServerManager:
     """Owns the lifecycle of a single launched llama-server process."""
 
-    def __init__(self, retarget: Callable[[str, str, int], None]):
+    def __init__(self, retarget: Callable[[str, str, int], None],
+                 finish_log: Optional[Callable[[], None]] = None):
         # retarget(url, log_path, port) repoints the dashboard's collectors.
         self._retarget = retarget
+        self._finish_log = finish_log
         self._lock = threading.Lock()
         self._proc: Optional[subprocess.Popen] = None
         # PID of a server adopted from a previous dashboard run (we have no Popen
@@ -161,6 +165,9 @@ class ServerManager:
         if not _process_alive(pid):
             store.set_running(None)
             return None
+        if not rec.get("run_id"):
+            rec["run_id"] = uuid.uuid4().hex
+            store.set_running(rec)
         with self._lock:
             self.current = rec.get("config")
             self.started_at = rec.get("started_at")
@@ -179,6 +186,16 @@ class ServerManager:
         # Managed flags, always at known values, appended last so they win.
         argv += ["--port", str(int(port))]
         argv += ["--metrics"]
+        advertised = flags_mod.get_server_flags(binary)
+        supported = {alias for entry in advertised["flags"] for alias in entry.get("flags", [])} \
+            if advertised["source"] == "help" else set()
+        for flag in ("--log-jsonl", "--log-timestamps"):
+            if flag in supported:
+                argv.append(flag)
+        if config.get("log_prompts"):
+            if "--log-prompts-dir" not in supported:
+                raise LaunchError("This llama-server build does not support prompt logging.")
+            argv += ["--log-prompts-dir", store.PROMPTS_DIR]
         argv += ["--log-file", store.MANAGED_LOG]
         return argv
 
@@ -214,6 +231,8 @@ class ServerManager:
             self._refresh()
             if self._proc is not None or self._adopted_pid is not None:
                 self._stop_locked()
+            if self._finish_log:
+                self._finish_log()
             store._ensure_dir()
             # Truncate the managed log so the tailer starts clean for this run.
             try:
@@ -245,6 +264,7 @@ class ServerManager:
                 "port": port,
                 "config": config,
                 "started_at": self.started_at,
+                "run_id": uuid.uuid4().hex,
                 "log_path": store.MANAGED_LOG,
             })
 
@@ -254,7 +274,10 @@ class ServerManager:
 
     def stop(self) -> dict:
         with self._lock:
+            had_server = self._proc is not None or self._adopted_pid is not None
             self._stop_locked()
+            if had_server and self._finish_log:
+                self._finish_log()
             self._stopped_by_user = True
             store.set_running(None)
         return self.status()

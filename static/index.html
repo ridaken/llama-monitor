@@ -253,6 +253,18 @@
     font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     white-space: pre-wrap; word-break: break-word;
   }
+  .history-card { width: min(1120px, 96vw); height: min(88vh, 860px); }
+  .history-controls { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; align-items:center; }
+  .history-controls label { color:var(--muted); font-size:12px; }
+  .history-controls input, .history-controls select { margin-left:4px; max-width:150px; }
+  .history-wrap { flex:1; overflow:auto; border:1px solid var(--border); border-radius:6px; }
+  .history-table { width:100%; border-collapse:collapse; font-size:12px; white-space:nowrap; }
+  .history-table th, .history-table td { padding:8px; border-bottom:1px solid var(--border); text-align:left; }
+  .history-table th { position:sticky; top:0; background:var(--panel); color:var(--muted); }
+  .history-prompt-panel { display:flex; flex-direction:column; min-height:140px; height:40%; margin-top:10px; }
+  .history-prompt-panel[hidden] { display:none; }
+  .history-foot { display:flex; align-items:center; gap:8px; margin-top:10px; }
+  .history-foot .path { flex:1; overflow-wrap:anywhere; }
 </style>
 </head>
 <body>
@@ -262,6 +274,7 @@
     <span id="status" class="pill off">connecting…</span>
     <span id="model" class="muted"></span>
     <span id="updated" class="muted" style="margin-left:auto;"></span>
+    <button id="history-open" class="btn">Activity history</button>
   </header>
 
   <section class="launcher">
@@ -297,6 +310,11 @@
         <span class="lx-label">Port</span>
         <input id="lx-port" type="number" min="1" max="65535" class="lx-port-input" />
         <span class="note">llama-monitor adds <code>--metrics</code> and <code>--log-file</code> automatically.</span>
+      </div>
+      <div class="lx-row">
+        <span class="lx-label">Prompt logging</span>
+        <label><input id="lx-log-prompts" type="checkbox" /> Save prompts in Activity history</label>
+        <span class="note">Uses llama-server's debugging files when supported. May contain private text; responses are not saved.</span>
       </div>
 
       <div class="lx-row" style="align-items:flex-start">
@@ -368,6 +386,31 @@
     </div>
   </div>
 
+  <div id="history-modal" class="console-modal" hidden role="dialog" aria-modal="true" aria-label="Activity history">
+    <div class="console-card history-card">
+      <div class="console-head"><span class="title">Activity history</span>
+        <span class="note">Observed generations · prompt text when enabled · no response text</span>
+        <span style="flex:1"></span><button id="history-close" class="btn">Close</button></div>
+      <div class="history-controls">
+        <label>Model <select id="history-model"><option value="">All models</option></select></label>
+        <label>State <select id="history-state"><option value="">All states</option><option value="complete">Complete</option><option value="incomplete">Incomplete</option><option value="ambiguous">Ambiguous</option><option value="prompt_only">Prompt only</option><option value="running">Running</option><option value="error">Error</option></select></label>
+        <label>From <input id="history-from" type="date"></label>
+        <label>To <input id="history-to" type="date"></label>
+        <label>Sort <select id="history-sort"><option value="time">Time</option><option value="duration">Total duration</option><option value="prompt_tokens">Prompt tokens</option><option value="generated_tokens">Generated tokens</option></select></label>
+        <label>Order <select id="history-order"><option value="desc">Descending</option><option value="asc">Ascending</option></select></label>
+      </div>
+      <div id="history-status" class="note"></div>
+      <div class="history-wrap"><table class="history-table"><thead><tr><th>Observed</th><th>Model</th><th>State</th><th>Run / slot / task</th><th>Prompt text</th><th>Prompt tokens</th><th>Generated</th><th>Prefill</th><th>Decode</th><th>Total</th><th>Draft</th></tr></thead><tbody id="history-body"></tbody></table></div>
+      <div id="history-prompt-panel" class="history-prompt-panel" hidden>
+        <div class="console-head"><strong>Saved prompt</strong><span id="history-prompt-note" class="note"></span><span style="flex:1"></span><button id="history-prompt-close" class="btn">Close prompt</button></div>
+        <pre id="history-prompt-text" class="console-out"></pre>
+      </div>
+      <div class="history-foot"><span id="history-path" class="path muted"></span>
+        <button id="history-prev" class="btn">Previous</button><button id="history-next" class="btn">Next</button>
+        <button id="history-clear" class="btn">Clear history…</button></div>
+    </div>
+  </div>
+
   <div class="grid">
     <div class="panel">
       <h2>Session <span class="tip" data-tip="The model loaded in llama-server and the live state of its request slots.">i</span></h2>
@@ -378,6 +421,8 @@
         <span class="tip" data-tip="A slot is one parallel inference lane — an independent request the server can generate at the same time as the others. The count comes from --parallel (default -1 = auto, which resolved to 4 here), so up to 4 requests run concurrently; any beyond that queue (shown as 'deferred'). This row is how many slots are busy right now vs the total.">i</span></span><span id="s-slots">—</span></div>
       <div class="row"><span class="k">Requests processing
         <span class="tip" data-tip="Number of requests being generated right now (from /metrics).">i</span></span><span id="s-req">—</span></div>
+      <div class="row"><span class="k">Requests deferred
+        <span class="tip" data-tip="Requests waiting for a free slot right now (from /metrics).">i</span></span><span id="s-deferred">—</span></div>
       <div class="row"><span class="k">KV-cache usage
         <span class="tip" data-tip="How full the KV cache is: tokens currently held across all slots (prompt + generated, including retained prompt caches) vs the context size.">i</span></span><span id="s-kv-pct">—</span></div>
       <div class="bar"><span id="s-kv-bar" style="width:0;background:var(--accent)"></span></div>
@@ -388,13 +433,13 @@
       <div class="tps-pair">
         <div>
           <div class="big"><span id="t-decode">—</span> <span class="unit">tok/s decode</span>
-            <span class="tip" data-tip="Token-generation speed in tokens/sec. Shows the live rate (3-sample smoothed) while generating; when idle it shows the last request's average.">i</span></div>
-          <div class="muted">live · last req <span id="t-decode-avg">—</span></div>
+            <span class="tip" data-tip="Live rate uses slot samples; the other value is llama-server's /metrics scrape-window gauge, not a single request.">i</span></div>
+          <div class="muted">live · scrape window <span id="t-decode-avg">—</span></div>
         </div>
         <div>
           <div class="big"><span id="t-pp">—</span> <span class="unit">tok/s pp</span>
-            <span class="tip" data-tip="Prompt-processing (prefill) speed of the most recent request, in tokens/sec.">i</span></div>
-          <div class="muted">last prompt</div>
+            <span class="tip" data-tip="Prompt-processing (prefill) throughput gauge from the latest /metrics scrape window.">i</span></div>
+          <div class="muted">scrape window</div>
         </div>
       </div>
       <svg id="spark" viewBox="0 0 320 72">
@@ -644,6 +689,7 @@ async function tick() {
     document.getElementById("s-slots").textContent =
       slots ? `${slots.busy} / ${slots.total}` : (m.total_slots ? `0 / ${m.total_slots}` : "—");
     document.getElementById("s-req").textContent = d.requests ? num(d.requests.processing,0) : "—";
+    document.getElementById("s-deferred").textContent = d.requests ? num(d.requests.deferred,0) : "—";
 
     const kv = d.kv && d.kv.usage_ratio != null ? d.kv.usage_ratio : null;
     const kvTokens = d.kv && d.kv.tokens != null ? d.kv.tokens : null;
@@ -654,7 +700,7 @@ async function tick() {
 
     const tp = d.throughput || {};
     // Live decode rate (from /slots, 3-sample smoothed) while generating;
-    // otherwise show the last-request average gauge. Sparkline tracks live.
+    // otherwise show the scrape-window gauge. Sparkline tracks live.
     const liveDecode = smoothLive(tp.decode_tps_live ?? null);
     const decodeShown = liveDecode ?? tp.decode_tps_avg ?? null;
     document.getElementById("t-decode").textContent = num(decodeShown);
@@ -727,5 +773,6 @@ async function tick() {
 tick();
 </script>
 <script src="/static/launcher.js"></script>
+<script src="/static/history.js"></script>
 </body>
 </html>
