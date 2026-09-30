@@ -141,6 +141,67 @@ test('narrow viewport keeps navigation and primary information accessible', asyn
     })
 })
 
+test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable persists', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockApi(page)
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Fit' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  await expect(page.locator('.monitor-panel')).toHaveCount(6)
+  const panelBottom = await page
+    .locator('.monitor-panel')
+    .evaluateAll((panels) =>
+      Math.max(...panels.map((panel) => panel.getBoundingClientRect().bottom)),
+    )
+  expect(panelBottom).toBeLessThanOrEqual(900)
+  if (process.env.CAPTURE_UI === '1') {
+    for (const [width, height] of [
+      [1440, 900],
+      [1920, 1080],
+      [2560, 1440],
+      [3840, 2160],
+    ]) {
+      await page.setViewportSize({ width, height })
+      await page.screenshot({
+        path: `test-results/monitor-fit-${width}.png`,
+      })
+    }
+  }
+
+  await page.getByRole('button', { name: 'Comfortable' }).click()
+  await expect(page.locator('.monitor-comfortable')).toBeVisible()
+  await page.reload()
+  await expect(
+    page.getByRole('button', { name: 'Comfortable' }),
+  ).toHaveAttribute('aria-pressed', 'true')
+  await page.setViewportSize({ width: 390, height: 844 })
+  if (process.env.CAPTURE_UI === '1')
+    await page.screenshot({
+      path: 'test-results/monitor-comfortable-mobile.png',
+      fullPage: true,
+    })
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true)
+  await page.getByRole('button', { name: 'Fit' }).click()
+  if (process.env.CAPTURE_UI === '1')
+    await page.screenshot({
+      path: 'test-results/monitor-fit-mobile.png',
+      fullPage: true,
+    })
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth + 1,
+    ),
+  ).toBe(true)
+})
+
 test('save as new during a guarded switch preserves the saved draft', async ({
   page,
 }) => {

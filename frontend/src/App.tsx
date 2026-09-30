@@ -14,6 +14,17 @@ import { Monitor } from '@/components/Monitor'
 import { useMonitor } from '@/hooks/useMonitor'
 
 type View = 'monitor' | 'manage' | 'history'
+type MonitorLayout = 'fit' | 'comfortable'
+const monitorLayoutKey = 'llama-monitor:monitor-layout'
+const readMonitorLayout = (): MonitorLayout => {
+  try {
+    return localStorage.getItem(monitorLayoutKey) === 'comfortable'
+      ? 'comfortable'
+      : 'fit'
+  } catch {
+    return 'fit'
+  }
+}
 const readView = (): View => {
   const hash = location.hash.slice(1)
   return hash === 'manage' || hash === 'history' ? hash : 'monitor'
@@ -21,7 +32,16 @@ const readView = (): View => {
 
 export default function App() {
   const [view, setView] = useState<View>(readView)
+  const [monitorLayout, setMonitorLayout] =
+    useState<MonitorLayout>(readMonitorLayout)
   const monitor = useMonitor()
+  useEffect(() => {
+    try {
+      localStorage.setItem(monitorLayoutKey, monitorLayout)
+    } catch {
+      // The layout still works when browser storage is unavailable.
+    }
+  }, [monitorLayout])
   useEffect(() => {
     const onHash = () => setView(readView())
     window.addEventListener('hashchange', onHash)
@@ -67,12 +87,12 @@ export default function App() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-40 border-b border-border/70 bg-background/95 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:px-10">
+        <div className="mx-auto flex max-w-[2400px] flex-wrap items-center gap-3 px-4 py-2 sm:px-6 lg:px-8">
           <a
             href="#monitor"
             className="focus-ring flex min-w-0 items-center gap-3 rounded-lg"
           >
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-primary/40 bg-primary/10 text-primary">
+            <span className="brand-mark flex size-9 shrink-0 items-center justify-center rounded-xl border border-primary/40 bg-primary/10 text-primary">
               <Radio className="size-5" />
             </span>
             <span className="min-w-0">
@@ -105,21 +125,21 @@ export default function App() {
           </div>
         </div>
       </header>
-      <div className="mx-auto max-w-[1500px] px-4 pb-14 sm:px-6 lg:px-10">
-        <div className="flex flex-col gap-5 border-b border-border/60 py-6 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mx-auto max-w-[2400px] px-4 pb-10 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-2 border-b border-border/60 py-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-primary">
+            <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.2em] text-primary">
               <span className="size-1.5 rounded-full bg-primary" />
               Workspace
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
               {view === 'monitor'
                 ? 'Live monitor'
                 : view === 'manage'
                   ? 'Server management'
                   : 'Activity history'}
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-0.5 text-xs text-muted-foreground sm:text-sm">
               {view === 'monitor'
                 ? 'A clear view of what your model and hardware are doing now.'
                 : view === 'manage'
@@ -139,7 +159,7 @@ export default function App() {
         </div>
         <nav
           aria-label="Main navigation"
-          className="mb-6 flex flex-wrap gap-2 border-b border-border/60 py-3"
+          className="mb-3 flex flex-wrap items-center gap-2 border-b border-border/60 py-2"
         >
           {links.map(({ key, label, icon: Icon, description }) => (
             <Button
@@ -155,7 +175,7 @@ export default function App() {
               variant={view === key ? 'secondary' : 'ghost'}
               className={
                 view === key
-                  ? 'border border-primary/30 text-primary'
+                  ? 'accent-glow border border-primary/40 text-primary'
                   : 'text-muted-foreground'
               }
             >
@@ -169,10 +189,35 @@ export default function App() {
               </a>
             </Button>
           ))}
+          {view === 'monitor' && (
+            <div
+              role="group"
+              aria-label="Monitor layout"
+              className="ml-auto flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1"
+            >
+              {(['fit', 'comfortable'] as const).map((layout) => (
+                <Button
+                  key={layout}
+                  type="button"
+                  size="sm"
+                  variant={monitorLayout === layout ? 'secondary' : 'ghost'}
+                  aria-pressed={monitorLayout === layout}
+                  onClick={() => setMonitorLayout(layout)}
+                  className={
+                    monitorLayout === layout
+                      ? 'accent-glow border border-primary/40 text-primary'
+                      : 'text-muted-foreground'
+                  }
+                >
+                  {layout === 'fit' ? 'Fit' : 'Comfortable'}
+                </Button>
+              ))}
+            </div>
+          )}
         </nav>
         <main>
           <div hidden={view !== 'monitor'}>
-            <Monitor monitor={monitor} />
+            <Monitor monitor={monitor} layout={monitorLayout} />
           </div>
           <div hidden={view !== 'manage'}>
             <Manage />

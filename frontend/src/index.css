@@ -2,25 +2,25 @@
 
 :root {
   color-scheme: dark;
-  --background: #0c1119;
-  --foreground: #e9eef5;
-  --card: #151d29;
-  --card-foreground: #e9eef5;
-  --popover: #182230;
-  --popover-foreground: #e9eef5;
-  --primary: #71b8ff;
-  --primary-foreground: #07111b;
-  --secondary: #233043;
-  --secondary-foreground: #dbe7f3;
-  --muted: #1b2635;
-  --muted-foreground: #9daec1;
-  --accent: #263a50;
-  --accent-foreground: #edf6ff;
+  --background: #100f0e;
+  --foreground: #f2ece6;
+  --card: #1d1916;
+  --card-foreground: #f2ece6;
+  --popover: #251d18;
+  --popover-foreground: #f2ece6;
+  --primary: #ff9138;
+  --primary-foreground: #201006;
+  --secondary: #31261f;
+  --secondary-foreground: #f2e5d9;
+  --muted: #28211c;
+  --muted-foreground: #b5a69b;
+  --accent: #3b2b20;
+  --accent-foreground: #fff3e7;
   --destructive: #f17878;
   --destructive-foreground: #220c0c;
-  --border: #304052;
-  --input: #304052;
-  --ring: #71b8ff;
+  --border: #49392e;
+  --input: #49392e;
+  --ring: #ffac67;
   --radius: 0.8rem;
 }
 
@@ -72,15 +72,138 @@ button:disabled {
   cursor: not-allowed;
 }
 ::selection {
-  background: #285880;
+  background: #8a431c;
 }
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .surface {
-  background: linear-gradient(145deg, #172231 0%, #121a25 100%);
+  background: linear-gradient(145deg, #211b17 0%, #191512 100%);
   border: 1px solid var(--border);
-  box-shadow: 0 16px 38px #02060d3d;
+  box-shadow: 0 12px 30px #05030250;
+}
+.brand-mark,
+.accent-glow {
+  box-shadow:
+    0 0 0 1px #ff91381f,
+    0 0 18px #ff7b2230;
+}
+.monitor-feature {
+  border-color: #85471f;
+  box-shadow:
+    0 0 0 1px #ff913815,
+    0 0 28px #ff711b20;
+}
+.monitor-layout {
+  min-width: 0;
+}
+.monitor-fit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.monitor-fit .monitor-summary,
+.monitor-fit .monitor-panels {
+  gap: 10px;
+}
+.monitor-fit .monitor-feature {
+  min-width: 0;
+  padding: 14px 18px;
+}
+.monitor-fit .monitor-hero > .relative > p:first-child,
+.monitor-fit .monitor-decode > p:first-child {
+  margin-bottom: 6px;
+}
+.monitor-fit .monitor-hero h2 {
+  font-size: clamp(1.4rem, 2vw, 2rem);
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.monitor-fit .monitor-hero h2 + p {
+  margin-top: 5px;
+}
+.monitor-fit .monitor-hero .mt-7 {
+  margin-top: 12px;
+  gap: 8px;
+}
+.monitor-fit .monitor-hero .mt-7 > * {
+  padding: 3px 9px;
+}
+.monitor-fit .monitor-decode .metric {
+  font-size: 2.25rem;
+  line-height: 1.1;
+}
+.monitor-fit .monitor-decode .monitor-spark {
+  height: 28px;
+}
+.monitor-fit .monitor-panel-header {
+  padding: 12px 14px 5px;
+}
+.monitor-fit .monitor-panel-content {
+  padding: 0 14px 12px;
+}
+.monitor-fit .monitor-row {
+  gap: 8px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.monitor-fit .monitor-row > span {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.monitor-fit .monitor-row > span:last-child {
+  overflow-wrap: anywhere;
+}
+.monitor-fit .monitor-spark {
+  height: 30px;
+}
+.monitor-fit #split-legend {
+  margin-top: 8px;
+  row-gap: 4px;
+}
+.monitor-fit #split-note,
+.monitor-fit #gpu-total-w {
+  margin-top: 7px;
+}
+.monitor-fit #slots,
+.monitor-fit #gpus > div {
+  gap: 8px;
+}
+.monitor-fit .monitor-slot,
+.monitor-fit .monitor-gpu {
+  padding: 10px;
+}
+.monitor-fit .monitor-slot > div:first-child,
+.monitor-fit .monitor-slot > p,
+.monitor-fit .monitor-gpu > div:first-child {
+  margin-bottom: 7px;
+}
+.monitor-fit .monitor-gpu > .space-y-3 {
+  row-gap: 5px;
+}
+.monitor-fit .monitor-gpu > .mt-4 {
+  margin-top: 8px;
+}
+@media (min-width: 1280px) {
+  .monitor-fit .monitor-panels {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+  .monitor-fit .monitor-session,
+  .monitor-fit .monitor-throughput,
+  .monitor-fit .monitor-split,
+  .monitor-fit .monitor-memory {
+    grid-row: 1;
+    grid-column: span 3;
+  }
+  .monitor-fit .monitor-slots {
+    grid-row: 2;
+    grid-column: span 4;
+  }
+  .monitor-fit .monitor-gpus {
+    grid-row: 2;
+    grid-column: span 8;
+  }
 }
 .metric {
   font-variant-numeric: tabular-nums;

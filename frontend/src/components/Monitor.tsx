@@ -22,7 +22,7 @@ import type { useMonitor } from '@/hooks/useMonitor'
 
 type MonitorData = ReturnType<typeof useMonitor>
 const splitColors = [
-  '#69aff7',
+  '#ff9138',
   '#9e86eb',
   '#56c5a8',
   '#e5ad66',
@@ -69,15 +69,15 @@ function Panel({
   className?: string
 }) {
   return (
-    <Card className={`surface min-w-0 rounded-2xl ${className}`}>
-      <CardHeader className="pb-3">
+    <Card className={`surface monitor-panel min-w-0 rounded-2xl ${className}`}>
+      <CardHeader className="monitor-panel-header pb-3">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold tracking-wide text-slate-200">
           <Icon className="size-4 text-primary" />
           {title}
           <Info label={title}>{info}</Info>
         </CardTitle>
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent className="monitor-panel-content">{children}</CardContent>
     </Card>
   )
 }
@@ -94,7 +94,7 @@ function Row({
   info?: string
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-border/45 py-2 last:border-0">
+    <div className="monitor-row flex items-start justify-between gap-4 border-b border-border/45 py-2 last:border-0">
       <span className="text-sm text-muted-foreground">
         {label}
         {info && <Info label={label}>{info}</Info>}
@@ -108,7 +108,7 @@ function Row({
 
 function Spark({
   values,
-  color = '#71b8ff',
+  color = '#ff9138',
   max,
   axis = false,
   label,
@@ -138,7 +138,7 @@ function Spark({
       aria-label={label}
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
-      className={`w-full ${axis ? 'h-24' : 'h-11'}`}
+      className={`monitor-spark w-full ${axis ? 'h-24' : 'h-11'}`}
     >
       {axis && (
         <>
@@ -189,7 +189,13 @@ const timing = (value?: Timing, rate = true) =>
     ? `${value.tokens.toLocaleString()} tok · ${value.secs.toFixed(2)}s${rate && value.tps ? ` (${value.tps.toFixed(0)} tok/s)` : ''}`
     : '—'
 
-export function Monitor({ monitor }: { monitor: MonitorData }) {
+export function Monitor({
+  monitor,
+  layout,
+}: {
+  monitor: MonitorData
+  layout: 'fit' | 'comfortable'
+}) {
   const { data: d, samples } = monitor
   const model = d?.model || {}
   const slots = d?.slots
@@ -215,10 +221,12 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
   const splitTotal = split.reduce((sum, item) => sum + item.bytes, 0)
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="space-y-6">
-        <div className="grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
-          <div className="surface subtle-grid relative overflow-hidden rounded-2xl p-6 sm:p-8">
-            <div className="absolute -right-20 -top-28 size-64 rounded-full bg-blue-500/10 blur-3xl" />
+      <div
+        className={`monitor-layout monitor-${layout} ${layout === 'comfortable' ? 'space-y-6' : ''}`}
+      >
+        <div className="monitor-summary grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
+          <div className="surface subtle-grid monitor-feature monitor-hero relative overflow-hidden rounded-2xl p-6 sm:p-8">
+            <div className="absolute -right-20 -top-28 size-64 rounded-full bg-primary/10 blur-3xl" />
             <div className="relative">
               <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-primary">
                 <Activity className="size-4" /> Live session
@@ -254,8 +262,8 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
               </div>
             </div>
           </div>
-          <div className="surface rounded-2xl p-6 sm:p-8">
-            <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-teal-300">
+          <div className="surface monitor-feature monitor-decode rounded-2xl p-6 sm:p-8">
+            <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-primary">
               <Zap className="size-4" /> Decode speed
             </p>
             <div className="metric text-5xl font-semibold">
@@ -270,7 +278,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
             </p>
             <Spark
               values={samples.decode}
-              color="#56c5a8"
+              color="#ff9138"
               label="Decode tokens per second over the last 60 samples"
             />
             <p className="text-xs text-muted-foreground">
@@ -278,11 +286,12 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
             </p>
           </div>
         </div>
-        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="monitor-panels grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           <Panel
             title="Session"
             icon={CircuitBoard}
             info="The loaded model, request lanes, and shared KV cache."
+            className="monitor-session"
           >
             <Row
               label="Processing"
@@ -315,6 +324,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
             title="Throughput"
             icon={Gauge}
             info="Prompt processing and generation rates from llama-server metrics and live slots."
+            className="monitor-throughput"
           >
             <Row
               label="Prompt processing"
@@ -347,6 +357,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
             title="Memory split"
             icon={Boxes}
             info="Estimated model footprint by device; the source note explains accuracy."
+            className="monitor-split"
           >
             <div
               id="split-bar"
@@ -398,7 +409,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
             title="Slots"
             icon={Activity}
             info="Parallel inference lanes. Idle slots can retain a prompt cache."
-            className="xl:col-span-2"
+            className="monitor-slots xl:col-span-2"
           >
             <div id="slots" className="grid gap-3 sm:grid-cols-2">
               {slots?.list?.length ? (
@@ -418,7 +429,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
                   return (
                     <div
                       key={slot.id}
-                      className="rounded-xl border border-border/70 bg-background/30 p-4"
+                      className="monitor-slot rounded-xl border border-border/70 bg-background/30 p-4"
                     >
                       <div className="mb-3 flex items-center justify-between">
                         <strong>Slot {slot.id}</strong>
@@ -453,6 +464,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
             title="System memory"
             icon={MemoryStick}
             info="Whole-machine RAM and the llama-server process resident memory."
+            className="monitor-memory"
           >
             <div id="sysmem">
               {d?.sysmem?.ok ? (
@@ -497,7 +509,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
             title="GPUs"
             icon={Cpu}
             info="NVIDIA GPU temperature, utilization, power, and VRAM. Each trend shows about 60 samples."
-            className="xl:col-span-3"
+            className="monitor-gpus xl:col-span-3"
           >
             <div id="gpus">
               {d?.gpu?.ok && d.gpu.devices?.length ? (
@@ -510,7 +522,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
                     return (
                       <div
                         key={device.index}
-                        className="rounded-xl border border-border/70 bg-background/30 p-4"
+                        className="monitor-gpu rounded-xl border border-border/70 bg-background/30 p-4"
                       >
                         <div className="mb-4 flex items-start justify-between gap-3">
                           <strong>
@@ -536,7 +548,7 @@ export function Monitor({ monitor }: { monitor: MonitorData }) {
                                 'util',
                                 device.util_gpu,
                                 100,
-                                '#71b8ff',
+                                '#ff9138',
                                 '%',
                               ],
                               [
