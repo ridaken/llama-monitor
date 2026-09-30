@@ -664,7 +664,7 @@ class LogTailer:
     _DRAFT = re.compile(
         r"draft acceptance\s*=\s*([\d.]+)\D+?(\d+)\s*accepted\s*/\s*(\d+)\s*generated", re.I
     )
-    _ACCLEN = re.compile(r"mean acceptance length\s*=\s*([\d.]+)", re.I)
+    _ACCLEN = re.compile(r"mean (?:acceptance )?(?:len|length)\s*=\s*([\d.]+)", re.I)
 
     def __init__(self, path: Optional[str]):
         self.path = path

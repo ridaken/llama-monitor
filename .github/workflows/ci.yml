@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, codex/sqlite-generation-history]
 
 jobs:
   test:
@@ -32,3 +32,38 @@ jobs:
       # the tests mock NVML/psutil and the flag-help subprocess.
       - name: Run tests
         run: pytest -q
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Check frontend source
+        working-directory: frontend
+        run: |
+          pnpm format:check
+          pnpm build
+      - name: Check committed assets
+        run: test -z "$(git status --porcelain --untracked-files=all -- static/app)"
+      - name: Install Chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Browser tests
+        working-directory: frontend
+        run: pnpm test:e2e

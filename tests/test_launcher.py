@@ -68,6 +68,33 @@ def test_build_argv_injects_managed_flags_last():
     assert argv[p + 1] == "8001"
 
 
+def test_build_argv_uses_only_advertised_jsonl_flags(monkeypatch):
+    mgr = ServerManager(lambda *a: None)
+    cfg = {"model_path": "model.gguf", "port": 8001, "flags": []}
+    monkeypatch.setattr(launcher.flags_mod, "get_server_flags", lambda binary: {
+        "source": "help", "flags": [{"flags": ["--log-jsonl"]}]})
+    argv = mgr.build_argv(cfg, "llama-server")
+    assert "--log-jsonl" in argv
+    assert "--log-timestamps" not in argv
+    monkeypatch.setattr(launcher.flags_mod, "get_server_flags", lambda binary: {
+        "source": "bundled", "flags": [{"flags": ["--log-jsonl", "--log-timestamps"]}]})
+    argv = mgr.build_argv(cfg, "llama-server")
+    assert "--log-jsonl" not in argv and "--log-timestamps" not in argv
+
+
+def test_prompt_logging_requires_native_flag(monkeypatch):
+    mgr = ServerManager(lambda *a: None)
+    cfg = {"model_path": "model.gguf", "port": 8001, "flags": [], "log_prompts": True}
+    monkeypatch.setattr(launcher.flags_mod, "get_server_flags", lambda binary: {
+        "source": "help", "flags": [{"flags": ["--log-prompts-dir"]}]})
+    argv = mgr.build_argv(cfg, "llama-server")
+    assert argv[argv.index("--log-prompts-dir") + 1] == store.PROMPTS_DIR
+    monkeypatch.setattr(launcher.flags_mod, "get_server_flags", lambda binary: {
+        "source": "bundled", "flags": [{"flags": ["--log-prompts-dir"]}]})
+    with pytest.raises(LaunchError, match="does not support prompt logging"):
+        mgr.build_argv(cfg, "llama-server")
+
+
 # --------------------------------------------------------------------------- #
 # binary resolution                                                            #
 # --------------------------------------------------------------------------- #
@@ -241,6 +268,7 @@ def test_launch_persists_running_record_and_stop_clears_it(good_settings, fake_p
     assert rec["port"] == 9001
     assert rec["pid"] == fake_popen["proc"].pid
     assert rec["log_path"] == store.MANAGED_LOG
+    assert len(rec["run_id"]) == 32
 
     mgr.stop()
     assert store.get_running() is None
@@ -256,6 +284,7 @@ def test_adopt_reattaches_to_a_live_server(good_settings, monkeypatch):
 
     rec = mgr.adopt()
     assert rec is not None and rec["port"] == 9001
+    assert rec["run_id"] == store.get_running()["run_id"]
     st = mgr.status()
     assert st["state"] == "running"
     assert st["adopted"] is True
