@@ -85,9 +85,9 @@ export default function App() {
     },
   ]
   return (
-    <div className="min-h-screen bg-background">
+    <div className="app-shell min-h-dvh bg-background">
       <header className="sticky top-0 z-40 border-b border-border/70 bg-background/95 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[2400px] flex-wrap items-center gap-3 px-4 py-2 sm:px-6 lg:px-8">
+        <div className="flex w-full flex-wrap items-center gap-3 px-4 py-1.5 sm:px-6 lg:px-8">
           <a
             href="#monitor"
             className="focus-ring flex min-w-0 items-center gap-3 rounded-lg"
@@ -125,8 +125,8 @@ export default function App() {
           </div>
         </div>
       </header>
-      <div className="mx-auto max-w-[2400px] px-4 pb-10 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-2 border-b border-border/60 py-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="app-body mx-auto w-full px-4 pb-4 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-2 border-b border-border/60 py-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.2em] text-primary">
               <span className="size-1.5 rounded-full bg-primary" />
@@ -159,7 +159,7 @@ export default function App() {
         </div>
         <nav
           aria-label="Main navigation"
-          className="mb-3 flex flex-wrap items-center gap-2 border-b border-border/60 py-2"
+          className="mb-2 flex flex-wrap items-center gap-2 border-b border-border/60 py-1"
         >
           {links.map(({ key, label, icon: Icon, description }) => (
             <Button
@@ -215,8 +215,8 @@ export default function App() {
             </div>
           )}
         </nav>
-        <main>
-          <div hidden={view !== 'monitor'}>
+        <main className="app-main">
+          <div className="monitor-view" hidden={view !== 'monitor'}>
             <Monitor monitor={monitor} layout={monitorLayout} />
           </div>
           <div hidden={view !== 'manage'}>
@@ -226,7 +226,7 @@ export default function App() {
             <History active={view === 'history'} />
           </div>
         </main>
-        <footer className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-6 text-xs text-muted-foreground">
+        <footer className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-3 text-xs text-muted-foreground">
           <span>Local llama-server monitoring</span>
           <span>Data stays on this machine</span>
         </footer>
