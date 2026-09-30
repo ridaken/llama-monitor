@@ -22,7 +22,7 @@ import type { useMonitor } from '@/hooks/useMonitor'
 
 type MonitorData = ReturnType<typeof useMonitor>
 const splitColors = [
-  '#ff9138',
+  '#ff6a00',
   '#9e86eb',
   '#56c5a8',
   '#e5ad66',
@@ -108,7 +108,7 @@ function Row({
 
 function Spark({
   values,
-  color = '#ff9138',
+  color = '#ff6a00',
   max,
   axis = false,
   label,
@@ -278,7 +278,7 @@ export function Monitor({
             </p>
             <Spark
               values={samples.decode}
-              color="#ff9138"
+              color="#ff6a00"
               label="Decode tokens per second over the last 60 samples"
             />
             <p className="text-xs text-muted-foreground">
@@ -548,7 +548,7 @@ export function Monitor({
                                 'util',
                                 device.util_gpu,
                                 100,
-                                '#ff9138',
+                                '#ff6a00',
                                 '%',
                               ],
                               [
