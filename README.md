@@ -146,7 +146,12 @@ a visible coverage gap. External logs start recording when first attached,
 from the current end of the file.
 
 For managed launches, enable **Save prompts in Activity history** in the
-configuration, then relaunch the server. When its binary supports
+configuration, click **Save** to keep the option for future launches, then
+relaunch the server. The option is saved per configuration in
+`~/.llama-monitor/state.json`; toggling it alone only edits the current form.
+Reloading while a managed server is running restores the configuration it was
+actually launched with, including any edits that have not been saved to a named
+configuration. When its binary supports
 `--log-prompts-dir`, llama-monitor reads the prompt files and saves their text
 in SQLite. Select **View prompt** in a history row to read it. The native files
 contain the server's rendered prompt, which may include private text; they are

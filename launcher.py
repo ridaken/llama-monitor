@@ -143,6 +143,7 @@ class ServerManager:
             return {
                 "state": state,
                 "config_name": (self.current or {}).get("name"),
+                "config": self.current,
                 "pid": self._proc.pid if self._proc else self._adopted_pid,
                 "exit_code": self.exit_code,
                 "started_at": self.started_at,

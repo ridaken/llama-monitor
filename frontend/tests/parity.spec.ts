@@ -1,5 +1,85 @@
 import { expect, test } from '@playwright/test'
-import { config, mockApi, stats } from './fixtures'
+import { config, launcherState, mockApi, stats } from './fixtures'
+
+for (const enabled of [true, false]) {
+  test(`reload restores running prompt logging (${enabled}) over saved config`, async ({
+    page,
+  }) => {
+    const running = { ...config, log_prompts: enabled }
+    const calls = await mockApi(page, {
+      'GET /api/launcher/state': () => ({
+        ...launcherState,
+        configs: [{ ...config, log_prompts: !enabled }],
+        status: {
+          state: 'running',
+          adopted: true,
+          config_name: config.name,
+          config: running,
+        },
+      }),
+    })
+    await page.goto('/#manage')
+    await expect(page.locator('#lx-log-prompts')).toBeChecked({
+      checked: enabled,
+    })
+    await expect(page.locator('#lx-dirty-mark')).toBeVisible()
+    // Polling must not overwrite subsequent form edits.
+    const reads = () =>
+      calls.filter((c) => c === 'GET /api/launcher/state').length
+    const initialReads = reads()
+    await page.locator('#lx-log-prompts').click()
+    await expect.poll(reads).toBeGreaterThan(initialReads)
+    await expect(page.locator('#lx-log-prompts')).toBeChecked({
+      checked: !enabled,
+    })
+    await page.reload()
+    await expect(page.locator('#lx-log-prompts')).toBeChecked({
+      checked: enabled,
+    })
+  })
+}
+
+test('reload restores an unnamed running configuration', async ({ page }) => {
+  await mockApi(page, {
+    'GET /api/launcher/state': () => ({
+      ...launcherState,
+      status: {
+        state: 'running',
+        config_name: '',
+        config: { ...config, name: '', log_prompts: true, port: 9001 },
+      },
+    }),
+  })
+  await page.goto('/#manage')
+  await expect(page.locator('#lx-log-prompts')).toBeChecked()
+  await expect(page.locator('#lx-model')).toHaveValue(config.model_path)
+  await expect(page.locator('#lx-port')).toHaveValue('9001')
+  await expect(page.locator('#lx-dirty-mark')).toBeVisible()
+})
+
+test('saved prompt logging survives reload with the server stopped', async ({
+  page,
+}) => {
+  let saved = { ...config }
+  await mockApi(page, {
+    'GET /api/launcher/state': () => ({ ...launcherState, configs: [saved] }),
+    'POST /api/configs': (request) => {
+      saved = request.postDataJSON()
+      return { configs: [saved] }
+    },
+  })
+  await page.goto('/#manage')
+  await expect(page.locator('#lx-config')).toContainText(config.name)
+  for (const enabled of [true, false]) {
+    await page.locator('#lx-log-prompts').click()
+    await page.locator('#lx-save').click()
+    await expect(page.locator('#lx-dirty-mark')).toBeHidden()
+    await page.reload()
+    await expect(page.locator('#lx-log-prompts')).toBeChecked({
+      checked: enabled,
+    })
+  }
+})
 
 test('monitor presents every telemetry group and status', async ({ page }) => {
   const calls = await mockApi(page)
