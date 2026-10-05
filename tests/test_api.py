@@ -123,6 +123,17 @@ def test_config_round_trip_preserves_disabled_flag(client):
     assert saved["flags"][1]["enabled"] is False
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+def test_config_round_trip_preserves_prompt_logging(client, enabled):
+    cfg = {"name": "prompts", "model_path": "C:/m.gguf", "port": 8001,
+           "flags": [], "log_prompts": enabled}
+    assert client.post("/api/configs", json=cfg).status_code == 200
+    saved = client.get("/api/launcher/state").json()["configs"][0]
+    assert saved["log_prompts"] is enabled
+    with open(store.STATE_PATH, encoding="utf-8") as f:
+        assert json.load(f)["configs"][0]["log_prompts"] is enabled
+
+
 def test_default_config_endpoint_sets_and_clears(client):
     client.post("/api/configs", json={"name": "fav", "model_path": "C:/m.gguf",
                                        "port": 8001, "flags": []})
@@ -241,3 +252,19 @@ def test_default_llama_url_adopts_live_server(monkeypatch, tmp_path):
     assert st["state"] == "running"
     assert st["adopted"] is True
     assert st["config_name"] == "c1"
+
+
+def test_adopted_server_exposes_actual_prompt_logging_config(monkeypatch, tmp_path):
+    _seed_running_server(monkeypatch, tmp_path)
+    saved = {"name": "c1", "model_path": "C:/m.gguf", "port": 9001,
+             "flags": [], "log_prompts": False}
+    store.upsert_config(saved)
+    running = store.get_running()
+    running["config"] = {**saved, "log_prompts": True}
+    store.set_running(running)
+    args = argparse.Namespace(llama_url=app_module.DEFAULT_LLAMA_URL, llama_log=None,
+                              port=8500, host="127.0.0.1")
+    with TestClient(app_module.build_app(args)) as c:
+        body = c.get("/api/launcher/state").json()
+    assert body["status"]["config"] == running["config"]
+    assert body["configs"][0]["log_prompts"] is False

@@ -206,6 +206,20 @@ export function Manage() {
         if (!initialized.current) {
           initialized.current = true
           const running = current.status.state === 'running'
+          const runningConfig = running ? current.status.config : null
+          if (runningConfig) {
+            // Keep the saved config as the baseline so launch-only edits can
+            // still be saved, but restore what this server actually launched.
+            loadConfig(runningConfig.name || '', current.configs)
+            setDraft(
+              normalizeConfig(
+                runningConfig,
+                current.settings.default_port || 8001,
+              ),
+            )
+            notify('Restored the running server configuration.')
+            return
+          }
           let choice =
             running &&
             current.configs.some((c) => c.name === current.status.config_name)
@@ -814,8 +828,8 @@ export function Manage() {
                 </strong>
                 <span className="mt-1 block text-xs font-normal text-muted-foreground">
                   Uses supported llama-server debugging files. Prompt text may
-                  contain private data; responses are not saved. Relaunch to
-                  apply.
+                  contain private data; responses are not saved. Click Save to
+                  keep this option with the configuration. Relaunch to apply.
                 </span>
               </span>
             </Label>
