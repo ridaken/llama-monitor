@@ -18,6 +18,7 @@ export type LauncherState = {
   status: {
     state: 'running' | 'stopped' | 'exited'
     config_name?: string | null
+    config?: Config | null
     exit_code?: number
     adopted?: boolean
   }
