@@ -18,9 +18,14 @@ version `0.4.6-llama-auth.565117ee`, from
 [Windows build 37533179792](https://github.com/ridaken/Apollo/actions/runs/37533179792).
 Its `Apollo.zip` SHA-256 is
 `d5ced82b492bb0667cf09b6ee0735018459dfe2bccc419e3b33fcd58c1eb9000`.
-Compilation and all six native session tests passed. Installation, real browser
-authentication during polling, and real Moonlight streaming acceptance are still
-pending; this candidate is not yet declared ready for everyday rollout.
+Compilation and all six native session tests passed. The package is installed on
+this PC. Two real browser sessions survived repeated UI logins, background monitor
+polling, and an invalid-password attempt. Original program files and configuration
+are backed up at
+`%LOCALAPPDATA%\llama-monitor\apollo-backups\20261006-independent-auth-565117ee`.
+The hook-installation administrator prompt was canceled; hooks and real Moonlight
+acceptance are pending, and switching remains disabled. This candidate is not yet
+declared ready for everyday rollout.
 
 The monitor checks compatibility before logging in and refuses stock builds.
 The fork uses independent 30-day sessions, stores only cookie hashes in memory,
