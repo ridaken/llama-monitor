@@ -37,7 +37,7 @@ function Save-Record($Record, [string]$Path) {
     $temporary = $Path + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
     try {
         [IO.File]::WriteAllText($temporary, ($Record | ConvertTo-Json -Depth 7), [Text.UTF8Encoding]::new($false))
-        if ([IO.File]::Exists($Path)) { [IO.File]::Replace($temporary, $Path, $null) }
+        if ([IO.File]::Exists($Path)) { [IO.File]::Replace($temporary, $Path, [NullString]::Value) }
         else { [IO.File]::Move($temporary, $Path) }
     } finally {
         if ([IO.File]::Exists($temporary)) { Remove-Item -LiteralPath $temporary -Force }
