@@ -409,3 +409,89 @@ def test_concurrent_configuration_writes_preserve_gaming_transition(rig):
         thread.join()
     assert len(store.list_configs()) == 20
     assert store.load_state()["gaming"]["transition"]["phase"] == "gaming"
+
+
+def enable_boot(rig, marker=1):
+    c, p, a, *_ = rig
+    snapshots = c.capture_startup_models()
+    p.live = a.live = False
+    store.update_startup(installed=True, autostart_models=True, models=snapshots, boot_marker=marker)
+    return snapshots
+
+
+def test_boot_loads_captured_models_and_is_once_per_boot(rig):
+    c, p, a, *_ = rig
+    snapshots = enable_boot(rig)
+    c.schedule_boot_models(2)
+    assert c.state()["reason"] == "startup"
+    c.tick()
+    assert p.live and a.live
+    assert p.loads[0] == snapshots[0] and a.loads[0] == snapshots[1]
+    c.stop_server()
+    c.schedule_boot_models(2)
+    c.tick()
+    assert not p.live and len(p.loads) == 1
+    c.schedule_boot_models(3)
+    c.tick()
+    assert p.live and len(p.loads) == 2 and len(a.loads) == 1
+
+
+def test_boot_models_work_with_gaming_disabled(rig):
+    c, p, a, apollo, *_ = rig
+    enable_boot(rig)
+    store.update_gaming(enabled=False)
+    apollo.error = ValueError("must not contact Apollo")
+    c.schedule_boot_models(2)
+    c.tick()
+    assert p.live and a.live and c.state()["phase"] == "normal"
+
+
+def test_boot_model_loading_waits_for_unknown_apollo_state(rig):
+    c, p, a, apollo, *_ = rig
+    enable_boot(rig)
+    apollo.error = ValueError("unknown")
+    c.schedule_boot_models(2)
+    c.tick()
+    assert not p.live and not a.live
+    apollo.error = None
+    c.tick()
+    assert p.live and a.live
+
+
+def test_moonlight_preempts_boot_queue_and_models_resume_afterwards(rig):
+    c, p, a, apollo, now, *_ = rig
+    enable_boot(rig)
+    c.schedule_boot_models(2)
+    apollo.clients = ["gaming"]
+    c.tick()
+    assert not p.live and not a.live and c.state()["phase"] == "gaming"
+    apollo.clients = []
+    c.tick()
+    now[0] += 60
+    c.tick()
+    assert p.live and a.live
+
+
+def test_prior_gaming_recovery_takes_priority_over_boot_preset(rig):
+    c, *_ = rig
+    disconnect(rig)
+    saved = copy.deepcopy(c.transition)
+    store.update_startup(installed=True, autostart_models=True, models=[], boot_marker=1)
+    c.schedule_boot_models(2)
+    assert c.transition == saved
+    assert store.load_state()["startup"]["boot_marker"] == 2
+
+
+def test_boot_failure_keeps_two_attempt_limit(rig):
+    c, p, a, _, now, *_ = rig
+    enable_boot(rig)
+    p.fail_load = True
+    c.schedule_boot_models(2)
+    c.tick()
+    assert a.live and c.state()["phase"] == "retry_countdown"
+    now[0] += 60
+    c.tick()
+    assert len(p.loads) == 2 and c.state()["phase"] == "failed"
+    c.schedule_boot_models(2)
+    c.tick()
+    assert len(p.loads) == 2

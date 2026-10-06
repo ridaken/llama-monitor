@@ -69,6 +69,9 @@ def _default_state() -> dict:
         "gaming": {"enabled": False, "apollo_url": "https://localhost:47990",
                    "credentials": None, "certificate_sha256": None,
                    "auxiliary": None, "transition": None},
+        "startup": {"installed": False, "mode": "boot", "autostart_models": False,
+                    "models": [], "boot_marker": None, "pending": None,
+                    "last_error": None, "last_result": None, "task_name": None},
     }
 
 
@@ -88,7 +91,9 @@ def _normalise(state: dict) -> dict:
     if not isinstance(running, dict):
         running = None
     gaming = {**base["gaming"], **(state.get("gaming") or {})}
-    return {"settings": settings, "configs": configs, "running": running, "gaming": gaming}
+    startup = {**base["startup"], **(state.get("startup") or {})}
+    return {"settings": settings, "configs": configs, "running": running,
+            "gaming": gaming, "startup": startup}
 
 
 def load_state() -> dict:
@@ -123,6 +128,10 @@ def update_state(change) -> dict:
 
 def update_gaming(**changes) -> dict:
     return update_state(lambda state: state["gaming"].update(changes))["gaming"]
+
+
+def update_startup(**changes) -> dict:
+    return update_state(lambda state: state["startup"].update(changes))["startup"]
 
 
 # --------------------------------------------------------------------------- #

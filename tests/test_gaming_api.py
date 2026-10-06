@@ -95,3 +95,22 @@ def test_gaming_stats_clear_stale_memory_but_keep_hardware(client, monkeypatch):
     assert not response["online"] and response["split"] == []
     assert "model" not in response and "kv" not in response
     assert "gpu" in response and "sysmem" in response
+
+
+def test_startup_controls_only_accept_local_same_origin_requests(client):
+    assert client.get("/api/startup/state").json()["installed"] is False
+    assert client.post("/api/startup/install", json={}, headers={"Origin": "https://evil.example"}).status_code == 400
+    with TestClient(client.app, client=("192.168.1.22", 123)) as remote:
+        assert remote.post("/api/startup/remove").status_code == 400
+
+
+def test_startup_setup_uses_native_operation_not_password_body(client, monkeypatch):
+    received = []
+    def setup(self, **kwargs):
+        received.append(kwargs)
+        return {"pending": True}
+    monkeypatch.setattr(app_module.WindowsStartup, "setup", setup)
+    response = client.post("/api/startup/install", json={"mode": "boot", "autostart_models": True})
+    assert response.status_code == 202
+    assert received == [{"mode": "boot", "autostart_models": True}]
+    assert "password" not in response.text

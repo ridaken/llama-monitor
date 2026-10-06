@@ -19,6 +19,8 @@ import hmac
 import ipaddress
 import json
 import secrets
+import logging
+import logging.config
 import string
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -43,6 +45,8 @@ from apollo import ApolloClient, certificate_fingerprint, parse_url, protect, un
 from apollo_setup import commands as hook_commands, write_hook_config
 from processes import discover_registered
 from instance import backend_lock
+from windows_startup import WindowsStartup
+from background import log_config as background_log_config
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(HERE, "static")
@@ -137,6 +141,8 @@ def build_app(args) -> FastAPI:
                      adopted.get("log_path") or store.MANAGED_LOG, a_port)
 
     gaming = GamingCoordinator(manager)
+    windows_startup = WindowsStartup(gaming, getattr(args, "port", 8500))
+    gaming.startup_results = windows_startup.consume_result
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -173,6 +179,29 @@ def build_app(args) -> FastAPI:
     def gaming_error(exc, code=409):
         message = str(exc) if isinstance(exc, (ValueError, LaunchError)) else "Gaming integration operation failed."
         return JSONResponse({"error": message}, status_code=code)
+
+    @app.get("/api/startup/state")
+    def startup_state():
+        return JSONResponse(windows_startup.state())
+
+    @app.post("/api/startup/install")
+    def startup_install(request: Request, body: dict):
+        try:
+            local_request(request)
+            if cli_target_explicit:
+                raise ValueError("Restart with plain python app.py before configuring startup.")
+            return JSONResponse(windows_startup.setup(mode=body.get("mode", "boot"),
+                autostart_models=body.get("autostart_models", True)), status_code=202)
+        except Exception as exc:
+            return gaming_error(exc, 400)
+
+    @app.post("/api/startup/remove")
+    def startup_remove(request: Request):
+        try:
+            local_request(request)
+            return JSONResponse(windows_startup.setup(action="remove", autostart_models=False), status_code=202)
+        except Exception as exc:
+            return gaming_error(exc, 400)
 
     @app.get("/api/gaming/state")
     def gaming_state():
@@ -643,18 +672,35 @@ def main() -> None:
         help="Port for this dashboard (default: 8500)",
     )
     p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--background", action="store_true", help="Run without a console and log to ~/.llama-monitor/backend.log")
     args = p.parse_args()
+
+    logging_config = background_log_config(store.HOME_DIR) if args.background else None
+    if logging_config:
+        logging.config.dictConfig(logging_config)
 
     try:
         with backend_lock(store.HOME_DIR):
             app = build_app(args)
-            print(f"llama-monitor -> dashboard on http://{args.host}:{args.port}")
-            print(f"   initial llama-server target: {args.llama_url}")
-            if args.llama_log:
-                print(f"   reading CPU split from {args.llama_log}")
-            uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+            if args.background:
+                logging.getLogger("llama_monitor").info("Backend starting on port %s", args.port)
+                uvicorn.run(app, host=args.host, port=args.port, log_level="warning", log_config=logging_config)
+            else:
+                print(f"llama-monitor -> dashboard on http://{args.host}:{args.port}")
+                print(f"   initial llama-server target: {args.llama_url}")
+                if args.llama_log:
+                    print(f"   reading CPU split from {args.llama_log}")
+                uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     except RuntimeError as exc:
+        if args.background:
+            logging.getLogger("llama_monitor").error("Backend stopped: %s", exc)
+            raise SystemExit(1)
         p.exit(1, f"{exc}\n")
+    except Exception:
+        if args.background:
+            logging.getLogger("llama_monitor").exception("Backend failed")
+            raise SystemExit(1)
+        raise
 
 
 if __name__ == "__main__":

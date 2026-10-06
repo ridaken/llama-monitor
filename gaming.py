@@ -10,7 +10,7 @@ import psutil
 
 import store
 from apollo import ApolloClient
-from launcher import LaunchError
+from launcher import LaunchError, resolve_binary
 from processes import AuxiliaryServer, identity_matches
 
 
@@ -25,6 +25,7 @@ class GamingCoordinator:
         self.stop_event = threading.Event()
         self.wake_event = threading.Event()
         self.thread = None
+        self.startup_results = None
         self.generation = 0
         self.connected = None
         self.integration_error = None
@@ -56,6 +57,7 @@ class GamingCoordinator:
             phase = transition.get("phase", "normal")
             deadline = transition.get("deadline")
             return {"enabled": settings["enabled"], "phase": phase,
+                    "reason": transition.get("reason"),
                     "blocked": phase != "normal", "connected_clients": None if self.connected is None else len(self.connected),
                     "countdown": max(0, int(deadline - self.clock() + .999)) if deadline else None,
                     "integration_error": self.integration_error,
@@ -67,6 +69,57 @@ class GamingCoordinator:
                     "certificate_sha256": settings.get("certificate_sha256"),
                     "auxiliary": settings.get("auxiliary")}
 
+    def capture_startup_models(self):
+        """Remember actual invocations; never substitute a named default."""
+        with self.lock:
+            snapshots = []
+            primary = self.manager.snapshot()
+            if primary:
+                snapshots.append(primary)
+            elif store.get_running():
+                raise LaunchError("Restart without an explicit watch target to adopt the managed model first.")
+            settings = store.load_state()["gaming"]
+            registration = settings["auxiliary"]
+            if not registration:
+                binary = resolve_binary(store.get_settings().get("llama_server_path"))
+                registration = {"executable": binary, "port": 8081} if binary else None
+            if registration:
+                auxiliary = self.auxiliary.snapshot(registration)
+                if auxiliary:
+                    if primary and primary["pid"] == auxiliary["pid"]:
+                        raise LaunchError("Embedding registration matches the primary model.")
+                    snapshots.append(auxiliary)
+            return sorted(snapshots, key=lambda s: s["created_at"])
+
+    def schedule_boot_models(self, boot_marker=None):
+        """Queue once per Windows boot; backend restarts respect explicit Stop."""
+        with self.lock:
+            marker = psutil.boot_time() if boot_marker is None else boot_marker
+            settings = store.load_state()["startup"]
+            if not settings["installed"] or not settings["autostart_models"] or settings["boot_marker"] == marker:
+                return
+            queued = []
+            if self.transition is None:
+                for snapshot in settings["models"]:
+                    if snapshot["id"] == "primary":
+                        live = self.manager.snapshot()
+                    else:
+                        registration = store.load_state()["gaming"]["auxiliary"]
+                        live = self.auxiliary.snapshot(registration) if registration else None
+                    if live:
+                        continue
+                    queued.append(copy.deepcopy(snapshot))
+                if queued:
+                    self.transition = {"reason": "startup", "phase": "countdown", "deadline": self.clock(),
+                        "prepared_until": None,
+                        "servers": [{**s, "original": copy.deepcopy(s), "live": None,
+                                     "status": "stopped", "attempts": 0, "error": None} for s in queued]}
+            def persist(state):
+                state["startup"].update(boot_marker=marker, last_result=(
+                    "AI boot startup queued." if queued else "Existing servers or pending model recovery take priority."))
+                state["gaming"]["transition"] = copy.deepcopy(self.transition)
+            store.update_state(persist)
+
     def primary_config(self):
         with self.lock:
             entry = next((s for s in (self.transition or {}).get("servers", [])
@@ -74,6 +127,9 @@ class GamingCoordinator:
             return copy.deepcopy(entry["original"].get("config")) if entry else None
 
     def start(self):
+        if self.startup_results:
+            self.startup_results()
+        self.schedule_boot_models()
         self.thread = threading.Thread(target=self._run, name="gaming-coordinator", daemon=True)
         self.thread.start()
 
@@ -86,6 +142,8 @@ class GamingCoordinator:
     def _run(self):
         while not self.stop_event.is_set():
             try:
+                if self.startup_results:
+                    self.startup_results()
                 self.tick()
             except Exception:
                 # Avoid printing credentials or invocation arguments in errors.
@@ -161,7 +219,7 @@ class GamingCoordinator:
                                    "servers": [{**s, "original": copy.deepcopy(s), "live": s,
                                                 "status": "running", "attempts": 0, "error": None}
                                                for s in snapshots]}
-            self.transition.update(phase="stopping", deadline=None, prepared_until=self.clock() + 30)
+            self.transition.update(reason="gaming", phase="stopping", deadline=None, prepared_until=self.clock() + 30)
             self._save()  # Durable restoration intent precedes the first signal.
             errors = []
             for entry in self.transition["servers"]:
@@ -216,15 +274,19 @@ class GamingCoordinator:
             settings = store.load_state()["gaming"]
             epoch = self.generation
         if not settings["enabled"]:
-            return
-        try:
-            clients = self.apollo.connected(settings)
-        except Exception as exc:
             with self.lock:
-                self.connected = None
-                self.reconciled = False
-                self.integration_error = str(exc) if isinstance(exc, ValueError) else "Cannot reach Apollo; AI restoration is on hold."
-            return
+                if not self.transition or self.transition.get("reason") != "startup":
+                    return
+            clients = []
+        else:
+            try:
+                clients = self.apollo.connected(settings)
+            except Exception as exc:
+                with self.lock:
+                    self.connected = None
+                    self.reconciled = False
+                    self.integration_error = str(exc) if isinstance(exc, ValueError) else "Cannot reach Apollo; AI restoration is on hold."
+                return
         with self.lock:
             if epoch != self.generation:
                 return  # An API result from before preparation is stale.

@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/select'
 import { basename } from '@/lib/utils'
 import { Gaming } from '@/components/Gaming'
+import { Startup } from '@/components/Startup'
 import type {
   Config,
   Flag,
@@ -705,6 +706,7 @@ export function Manage() {
         </Card>
       </div>
       <Gaming />
+      <Startup />
       <Card className="surface rounded-2xl">
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-3 text-lg">

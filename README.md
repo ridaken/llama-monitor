@@ -110,7 +110,7 @@ responses are not preserved. LAN AI clients must retry after the servers return.
 1. Restart the backend using **plain `python app.py`**, under the same Windows
    account Apollo uses for its unelevated application commands. Do not use an
    explicit watch target or set `LLAMA_URL` to a different URL. The backend must
-   re-adopt the managed process. No sign-in task or model autostart is installed.
+   re-adopt the managed process. Windows startup is configured separately below.
 2. In **Manage → Moonlight gaming integration**, enter Apollo's local HTTPS URL
    (normally `https://localhost:47990`), username, and password. **Save connection**,
    then **Test and trust local Apollo**. Credentials and the hook token use
@@ -281,6 +281,42 @@ For local integrations, `GET /api/history` accepts `model`, `state`, `from_ts`,
 `order` (`asc` or `desc`), `limit`, and an opaque `cursor` returned as
 `next_cursor`. `DELETE /api/history` clears saved generations while retaining
 the log cursor. `GET /api/history/{id}/prompt` returns saved text when available.
+
+## Automatic Windows startup
+
+Open **Manage → Windows startup** and click **Set up Windows startup**. The app
+creates and verifies the scheduled task for you; no manual Task Scheduler editing
+is needed. Approve the Windows administrator prompt. **When Windows boots** also
+asks for your Windows account password in a native Windows dialog (not your PIN).
+The password is never sent to the dashboard, written into configuration/task XML,
+or passed on a command line. Windows stores the task's credential. **When I sign
+in** uses your existing interactive session and requires no stored password.
+
+By default, setup remembers the running managed model and the registered embedding
+server (or discovers the configured executable on port 8081). Start the models
+you want before setup; their exact current arguments and working directories are
+saved, including unsaved launch settings. Clear the model checkbox for a
+controller-only task. Update setup to capture a different boot configuration.
+
+The task starts `pythonw.exe` hidden under your own account, 30 seconds after boot
+or 10 seconds after sign-in. It has no runtime limit, ignores duplicate starts,
+and retries backend failures every minute, up to 999 times. Background output
+goes to `~/.llama-monitor/backend.log` with bounded rotation. No browser window
+opens. Installation applies on the next boot or sign-in and does not restart
+your currently running backend or AI servers.
+
+Model autostart runs once per Windows boot. Existing running servers are retained;
+restarting the backend does not undo an explicit Stop in the same boot. Moonlight
+connections take priority over startup loading. When gaming integration is
+enabled, unknown Apollo status holds model loading. Persisted gaming recovery
+takes priority over the boot preset. Loading uses the existing readiness checks,
+five-minute timeout, and one automatic retry after 60 seconds.
+
+**Remove Windows startup** removes only the task installed for this Windows account
+and disables boot model loading. It does not stop current servers or remove Apollo
+hooks. Setup refuses to replace an unrelated task. Reapprove boot setup if your
+Windows password changes or the Python/repository paths move. Actual unattended
+boot and GPU availability must be checked after installation and a reboot.
 
 ## Setup
 

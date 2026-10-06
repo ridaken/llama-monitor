@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.25.0",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "format:check": "prettier --check src/App.tsx src/api.ts src/types.ts src/hooks src/lib/gaming.ts src/components/Monitor.tsx src/components/Manage.tsx src/components/History.tsx src/components/Gaming.tsx src/index.css tests",
+    "format:check": "prettier --check src/App.tsx src/api.ts src/types.ts src/hooks src/lib/gaming.ts src/components/Monitor.tsx src/components/Manage.tsx src/components/History.tsx src/components/Gaming.tsx src/components/Startup.tsx src/index.css tests",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "test:e2e": "node tests/run-e2e.cjs"

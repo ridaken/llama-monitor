@@ -1,6 +1,7 @@
 export type Flag = { flag: string; value: string; enabled?: boolean }
 export type GamingState = {
   enabled: boolean
+  reason?: 'startup' | 'gaming' | null
   phase:
     | 'normal'
     | 'stopping'
@@ -26,6 +27,18 @@ export type GamingState = {
   certificate_sha256: string | null
   auxiliary: { executable: string; port: number } | null
   commands?: { prepare: string; 'session-ended': string }
+}
+export type StartupState = {
+  supported: boolean
+  installed: boolean
+  mode: 'boot' | 'logon'
+  autostart_models: boolean
+  models: Array<{ id: string; name: string; port: number }>
+  pending: boolean
+  last_error: string | null
+  last_result: string | null
+  task_name: string | null
+  log_path: string
 }
 export type Config = {
   name: string
