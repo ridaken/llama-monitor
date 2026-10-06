@@ -21,12 +21,15 @@ def test_dpapi_round_trip():
 
 
 class ApolloServer:
-    """Apollo 0.4.6 contract: JSON login and one auth cookie, no Basic auth."""
+    """Independent sessions with a capability check before JSON login."""
     def __init__(self):
         self.requests = []
         self.connections = []
         self.fingerprint = "pin"
         self.cookie = None
+        self.sessions = set()
+        self.capability = {"status": True, "locale": "en", "auth_sessions": "multiple-v1"}
+        self.capability_status = 200
         self.login_status = 200
         self.login_cookie = True
         self.api_status = 200
@@ -49,17 +52,22 @@ class Connection:
 
     def request(self, method, path, **kwargs):
         self.server.requests.append((method, path, kwargs))
-        if path == "/api/login":
+        self.headers, self.body = [], b""
+        if path == "/api/configLocale":
+            assert method == "GET"
+            self.status = self.server.capability_status
+            self.body = json.dumps(self.server.capability).encode()
+        elif path == "/api/login":
             assert method == "POST" and kwargs["headers"]["Content-Type"] == "application/json"
             assert json.loads(kwargs["body"]) == {"username": "user", "password": "pw"}
             self.status = self.server.login_status
             if self.status == 200 and self.server.login_cookie:
                 self.server.cookie = "auth=session-" + str(len(self.server.requests))
+                self.server.sessions.add(self.server.cookie)
                 self.headers = [("Set-Cookie", self.server.cookie + "; Secure; SameSite=Strict; Path=/")]
         else:
             assert method == "GET" and path == "/api/clients/list"
-            self.status = (self.server.api_status if kwargs["headers"].get("Cookie") == self.server.cookie
-                           and self.server.cookie else 401)
+            self.status = (self.server.api_status if kwargs["headers"].get("Cookie") in self.server.sessions else 401)
             self.body = json.dumps(self.server.data).encode()
 
     def getresponse(self):
@@ -111,24 +119,24 @@ def test_apollo_connection_truth(server, body, status, expected):
 
 def test_json_login_and_cookie_are_used_without_basic_auth(server):
     assert apollo.ApolloClient().connected(SETTINGS) == ["a"]
-    assert [path for _, path, _ in server.requests] == ["/api/login", "/api/clients/list"]
-    assert all("Authorization" not in request[2]["headers"] for request in server.requests)
-    assert server.requests[1][2]["headers"] == {"Cookie": server.cookie}
+    assert [path for _, path, _ in server.requests] == ["/api/configLocale", "/api/login", "/api/clients/list"]
+    assert all("Authorization" not in request[2].get("headers", {}) for request in server.requests)
+    assert server.requests[2][2]["headers"] == {"Cookie": server.cookie}
 
 
 def test_cookie_reused_across_polls(server):
     client = apollo.ApolloClient()
     client.connected(SETTINGS)
     client.connected(SETTINGS)
-    assert [method for method, _, _ in server.requests] == ["POST", "GET", "GET"]
+    assert [method for method, _, _ in server.requests] == ["GET", "POST", "GET", "GET"]
 
 
-def test_expired_or_replaced_session_is_renewed_once(server):
+def test_expired_session_is_renewed_once(server):
     client = apollo.ApolloClient()
     client.connected(SETTINGS)
-    server.cookie = "auth=another-login"
+    server.sessions.clear()
     assert client.connected(SETTINGS) == ["a"]
-    assert [method for method, _, _ in server.requests] == ["POST", "GET", "GET", "POST", "GET"]
+    assert [method for method, _, _ in server.requests] == ["GET", "POST", "GET", "GET", "GET", "POST", "GET"]
     assert all(c.closed for c in server.connections)
 
 
@@ -136,7 +144,7 @@ def test_changed_credentials_clear_cached_cookie(server):
     client = apollo.ApolloClient()
     client.connected(SETTINGS)
     client.connected({**SETTINGS, "credentials": "new-encrypted"})
-    assert [method for method, _, _ in server.requests] == ["POST", "GET", "POST", "GET"]
+    assert [method for method, _, _ in server.requests] == ["GET", "POST", "GET", "GET", "POST", "GET"]
 
 
 def test_bad_login_has_actionable_error_without_password(server):
@@ -144,19 +152,60 @@ def test_bad_login_has_actionable_error_without_password(server):
     with pytest.raises(ValueError, match="Apollo rejected the saved username/password") as error:
         apollo.ApolloClient().connected(SETTINGS)
     assert "pw" not in str(error.value)
-    assert len(server.requests) == 1 and server.connections[0].closed
+    assert len(server.requests) == 2 and server.connections[0].closed
 
 
 def test_login_without_cookie_is_rejected(server):
     server.login_cookie = False
     with pytest.raises(ValueError, match="authentication cookie"):
         apollo.ApolloClient().connected(SETTINGS)
-    assert len(server.requests) == 1
+    assert len(server.requests) == 2
 
 
 def test_repeated_api_401_is_bounded(server):
     server.api_status = 401
     with pytest.raises(ValueError, match="HTTP 401"):
         apollo.ApolloClient().connected(SETTINGS)
-    assert len(server.requests) == 4
+    assert len(server.requests) == 6
     assert all(c.closed for c in server.connections)
+
+
+@pytest.mark.parametrize("capability,status", [
+    ({"status": True, "locale": "en"}, 200),
+    ({"status": True, "auth_sessions": "single"}, 200),
+    ({"status": False, "auth_sessions": "multiple-v1"}, 200),
+    (["multiple-v1"], 200),
+    ({"auth_sessions": "multiple-v1"}, 404),
+])
+def test_incompatible_apollo_never_receives_login(server, capability, status, monkeypatch):
+    server.capability, server.capability_status = capability, status
+    monkeypatch.setattr(apollo, "unprotect", lambda _: pytest.fail("Credentials must not be decrypted"))
+    with pytest.raises(ValueError, match="independent authentication sessions"):
+        apollo.ApolloClient().connected(SETTINGS)
+    assert [path for _, path, _ in server.requests] == ["/api/configLocale"]
+    assert all(c.closed for c in server.connections)
+
+
+def test_downgrade_after_401_does_not_attempt_login(server):
+    client = apollo.ApolloClient()
+    client.connected(SETTINGS)
+    server.sessions.clear()
+    server.capability = {"status": True, "locale": "en"}
+    with pytest.raises(ValueError, match="No login was attempted"):
+        client.connected(SETTINGS)
+    assert sum(path == "/api/login" for _, path, _ in server.requests) == 1
+
+
+def test_browser_and_another_monitor_login_do_not_invalidate_cookie(server):
+    first, second = apollo.ApolloClient(), apollo.ApolloClient()
+    first.connected(SETTINGS)
+    second.connected(SETTINGS)
+    server.sessions.add("auth=browser-login")
+    assert first.connected(SETTINGS) == second.connected(SETTINGS) == ["a"]
+    assert sum(path == "/api/login" for _, path, _ in server.requests) == 2
+
+
+def test_capacity_has_actionable_error(server):
+    server.login_status = 503
+    with pytest.raises(ValueError, match="sessions are full"):
+        apollo.ApolloClient().connected(SETTINGS)

@@ -92,6 +92,19 @@ class ApolloClient:
     def _login(self, settings):
         connection = self._connection(settings)
         try:
+            # Check on every login, even after a 401: a downgrade may keep the
+            # same TLS certificate. Never replace a stock Apollo browser session.
+            connection.request("GET", "/api/configLocale")
+            response = connection.getresponse()
+            body = response.read(1024 * 1024)
+            try:
+                capability = json.loads(body)
+            except (ValueError, TypeError):
+                capability = None
+            if (response.status != 200 or not isinstance(capability, dict)
+                    or capability.get("status") is not True
+                    or capability.get("auth_sessions") != "multiple-v1"):
+                raise ValueError("Install the Apollo build with independent authentication sessions from ridaken/Apollo before testing or enabling this integration. No login was attempted.")
             credentials = json.loads(unprotect(settings["credentials"]))
             payload = json.dumps({"username": credentials["username"], "password": credentials["password"]}).encode("utf-8")
             connection.request("POST", "/api/login", body=payload,
@@ -100,6 +113,8 @@ class ApolloClient:
             response.read(1024 * 1024)
             if response.status == 401:
                 raise ValueError("Apollo rejected the saved username/password. Enter the credentials used for Apollo's web UI, save the connection, and test again.")
+            if response.status == 503:
+                raise ValueError("Apollo's authentication sessions are full. Existing logins were preserved; AI restoration is on hold.")
             if response.status != 200:
                 raise ValueError(f"Apollo login failed (HTTP {response.status}).")
             cookies = SimpleCookie()
@@ -131,7 +146,7 @@ class ApolloClient:
                     if response.status == 401:
                         self._cookie = None
                         if attempt == 0:
-                            continue  # Expiry, Apollo restart, or another web UI login.
+                            continue  # Expiry or Apollo restart; check capability again.
                     if response.status != 200:
                         raise ValueError(f"Apollo connection failed (HTTP {response.status}).")
                     data = json.loads(body)

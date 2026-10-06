@@ -89,6 +89,9 @@ it; deleting a config also clears it if it was the default.
 
 ## Automatic Moonlight gaming mode (Windows / Apollo)
 
+For the supported custom Apollo build, package installation, and program-file
+rollback, see [Apollo build and recovery](docs/apollo-build.md).
+
 The **Manage** view includes a Moonlight integration panel. An incoming streaming
 connection stops the managed model and any registered embedding server, releasing
 their model and KV-cache allocations. Active AI requests are interrupted. After
@@ -117,11 +120,14 @@ responses are not preserved. LAN AI clients must retry after the servers return.
    Windows user-bound DPAPI. The local TLS certificate is pinned before credentials
    are sent; a changed certificate requires another explicit test. Blank password
    input preserves the saved credentials.
-   Apollo authentication uses its JSON login endpoint and an in-memory `auth`
-   session cookie. Polls reuse that cookie and renew it once if Apollo expires or
-   replaces the session. Apollo 0.4.6 keeps one web UI session: logging in from
-   another browser can invalidate the monitor's cookie, and its renewal can sign
-   that browser out. Moonlight streaming sessions are separate and unaffected.
+   Install the supported [ridaken/Apollo integration build](https://github.com/ridaken/Apollo/tree/codex/llama-monitor-integration)
+   first. It gives the browser and monitor independent authentication sessions.
+   Before every JSON login (including renewal after HTTP 401), the monitor checks
+   the pinned local `/api/configLocale` response for `auth_sessions: "multiple-v1"`.
+   Stock or downgraded builds receive no login request, preventing browser logout.
+   Polls reuse the monitor's in-memory cookie and renew it once on expiration or
+   Apollo restart. Repeated failure holds restoration rather than assuming that
+   clients disconnected. Credentials remain encrypted with Windows DPAPI.
 3. Start your embedding server if necessary, then **Register running embedding
    server** on port **8081**. Registration matches the selected llama-server
    executable and port; it does not control every process named llama-server.
