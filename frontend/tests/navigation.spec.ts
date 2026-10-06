@@ -158,18 +158,33 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
       Math.max(...panels.map((panel) => panel.getBoundingClientRect().bottom)),
     )
   expect(panelBottom).toBeLessThanOrEqual(900)
-  if (process.env.CAPTURE_UI === '1') {
-    for (const [width, height] of [
-      [1440, 900],
-      [1920, 1080],
-      [2560, 1440],
-      [3840, 2160],
-    ]) {
-      await page.setViewportSize({ width, height })
+  expect(panelBottom).toBeGreaterThan(850)
+  for (const [width, height] of [
+    [1440, 900],
+    [1920, 1080],
+    [2560, 1440],
+    [3840, 2160],
+  ]) {
+    await page.setViewportSize({ width, height })
+    if (process.env.CAPTURE_UI === '1')
       await page.screenshot({
         path: `test-results/monitor-fit-${width}.png`,
       })
-    }
+    const bottom = await page
+      .locator('.monitor-gpus')
+      .evaluate((panel) => panel.getBoundingClientRect().bottom)
+    expect(bottom).toBeGreaterThan(height * 0.88)
+    expect(bottom).toBeLessThanOrEqual(height)
+    const rowsOverlap = await page.evaluate(() => {
+      const features = [...document.querySelectorAll('.monitor-feature')]
+      const panels = document.querySelector('.monitor-panels')!
+      return features.some(
+        (feature) =>
+          feature.getBoundingClientRect().bottom >
+          panels.getBoundingClientRect().top,
+      )
+    })
+    expect(rowsOverlap).toBe(false)
   }
 
   await page.getByRole('button', { name: 'Comfortable' }).click()
@@ -190,6 +205,10 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
     ),
   ).toBe(true)
   await page.getByRole('button', { name: 'Fit' }).click()
+  await expect(page.getByRole('button', { name: 'Fit' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
   if (process.env.CAPTURE_UI === '1')
     await page.screenshot({
       path: 'test-results/monitor-fit-mobile.png',
@@ -200,6 +219,59 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
       () => document.documentElement.scrollWidth <= innerWidth + 1,
     ),
   ).toBe(true)
+})
+
+test('Fit reflows a four-slot, three-GPU dashboard without horizontal overflow', async ({
+  page,
+}) => {
+  const devices = [
+    {
+      ...stats.gpu.devices[0],
+      index: 0,
+      name: 'NVIDIA GeForce RTX 4070 SUPER',
+    },
+    { ...stats.gpu.devices[0], index: 1, name: 'NVIDIA GeForce RTX 3060 Ti' },
+    { ...stats.gpu.devices[0], index: 2, name: 'NVIDIA GeForce RTX 5060 Ti' },
+  ]
+  await mockApi(page, {
+    'GET /api/stats': () => ({
+      ...stats,
+      model: { ...stats.model, total_slots: 4 },
+      slots: {
+        busy: 1,
+        total: 4,
+        list: [
+          ...stats.slots.list,
+          { id: 2, state: 'idle', ctx_used: 0, ctx_ratio: 0 },
+          { id: 3, state: 'idle', ctx_used: 0, ctx_ratio: 0 },
+        ],
+      },
+      gpu: { ok: true, devices },
+    }),
+  })
+  for (const [width, height] of [
+    [1920, 1080],
+    [3840, 2005],
+  ]) {
+    await page.setViewportSize({ width, height })
+    await page.goto('/')
+    await expect(page.locator('.monitor-gpu')).toHaveCount(3)
+    await expect(page.locator('.monitor-slot')).toHaveCount(4)
+    await expect(page.locator('#status')).toContainText('llama-server online')
+    const panelBottom = await page
+      .locator('.monitor-gpus')
+      .evaluate((panel) => panel.getBoundingClientRect().bottom)
+    expect(panelBottom).toBeLessThanOrEqual(height)
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+    ).toBe(true)
+    if (process.env.CAPTURE_UI === '1')
+      await page.screenshot({
+        path: `test-results/monitor-multi-${width}.png`,
+      })
+  }
 })
 
 test('save as new during a guarded switch preserves the saved draft', async ({

@@ -2,25 +2,26 @@
 
 :root {
   color-scheme: dark;
-  --background: #100f0e;
-  --foreground: #f2ece6;
-  --card: #1d1916;
-  --card-foreground: #f2ece6;
-  --popover: #251d18;
-  --popover-foreground: #f2ece6;
-  --primary: #ff9138;
-  --primary-foreground: #201006;
-  --secondary: #31261f;
-  --secondary-foreground: #f2e5d9;
-  --muted: #28211c;
-  --muted-foreground: #b5a69b;
-  --accent: #3b2b20;
-  --accent-foreground: #fff3e7;
+  font-size: clamp(16px, 0.53vw, 20px);
+  --background: #080b10;
+  --foreground: #f4f6f8;
+  --card: #131922;
+  --card-foreground: #f4f6f8;
+  --popover: #1b222c;
+  --popover-foreground: #f4f6f8;
+  --primary: #ff6a00;
+  --primary-foreground: #180900;
+  --secondary: #222a35;
+  --secondary-foreground: #e4e9ef;
+  --muted: #1c242e;
+  --muted-foreground: #aebbc9;
+  --accent: #293340;
+  --accent-foreground: #f4f6f8;
   --destructive: #f17878;
   --destructive-foreground: #220c0c;
-  --border: #49392e;
-  --input: #49392e;
-  --ring: #ffac67;
+  --border: #364351;
+  --input: #425061;
+  --ring: #ff8e3d;
   --radius: 0.8rem;
 }
 
@@ -72,27 +73,54 @@ button:disabled {
   cursor: not-allowed;
 }
 ::selection {
-  background: #8a431c;
+  background: #a84200;
 }
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+.app-shell,
+.app-body,
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.app-body,
+.app-main,
+.monitor-view:not([hidden]) {
+  flex: 1;
+}
+.monitor-view:not([hidden]) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
 .surface {
-  background: linear-gradient(145deg, #211b17 0%, #191512 100%);
+  background: linear-gradient(145deg, #171e27 0%, #10151c 100%);
   border: 1px solid var(--border);
-  box-shadow: 0 12px 30px #05030250;
+  box-shadow: 0 12px 30px #02040750;
 }
 .brand-mark,
 .accent-glow {
   box-shadow:
-    0 0 0 1px #ff91381f,
-    0 0 18px #ff7b2230;
+    0 0 0 1px #ff6a0040,
+    0 0 22px #ff6a0060;
 }
 .monitor-feature {
-  border-color: #85471f;
+  position: relative;
+  border-color: #c65308;
   box-shadow:
-    0 0 0 1px #ff913815,
-    0 0 28px #ff711b20;
+    0 0 0 1px #ff6a0038,
+    0 0 32px #ff6a002c;
+}
+.monitor-feature::before {
+  position: absolute;
+  top: 0;
+  right: 24px;
+  left: 24px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ff6a00, transparent);
+  content: '';
 }
 .monitor-layout {
   min-width: 0;
@@ -100,6 +128,7 @@ button:disabled {
 .monitor-fit {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: 10px;
 }
 .monitor-fit .monitor-summary,
@@ -108,86 +137,139 @@ button:disabled {
 }
 .monitor-fit .monitor-feature {
   min-width: 0;
-  padding: 14px 18px;
+  padding: clamp(18px, 2.1vh, 30px) clamp(20px, 2vw, 34px);
 }
 .monitor-fit .monitor-hero > .relative > p:first-child,
 .monitor-fit .monitor-decode > p:first-child {
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 .monitor-fit .monitor-hero h2 {
-  font-size: clamp(1.4rem, 2vw, 2rem);
+  font-size: clamp(1.65rem, 2vw, 2.5rem);
   line-height: 1.1;
   overflow-wrap: anywhere;
 }
 .monitor-fit .monitor-hero h2 + p {
-  margin-top: 5px;
+  margin-top: 8px;
 }
 .monitor-fit .monitor-hero .mt-7 {
-  margin-top: 12px;
-  gap: 8px;
+  margin-top: clamp(14px, 2vh, 26px);
+  gap: 10px;
 }
 .monitor-fit .monitor-hero .mt-7 > * {
-  padding: 3px 9px;
+  padding: 5px 11px;
 }
 .monitor-fit .monitor-decode .metric {
-  font-size: 2.25rem;
+  font-size: clamp(2.5rem, 3vw, 4rem);
   line-height: 1.1;
 }
 .monitor-fit .monitor-decode .monitor-spark {
-  height: 28px;
+  height: clamp(36px, 5vh, 90px);
+  margin-top: auto;
 }
 .monitor-fit .monitor-panel-header {
-  padding: 12px 14px 5px;
+  padding: clamp(15px, 1.8vh, 26px) clamp(17px, 1.4vw, 28px) 7px;
 }
 .monitor-fit .monitor-panel-content {
-  padding: 0 14px 12px;
+  padding: 0 clamp(17px, 1.4vw, 28px) clamp(15px, 1.8vh, 26px);
 }
 .monitor-fit .monitor-row {
-  gap: 8px;
-  padding-top: 5px;
-  padding-bottom: 5px;
+  gap: 10px;
+  padding-top: clamp(6px, 0.7vh, 12px);
+  padding-bottom: clamp(6px, 0.7vh, 12px);
 }
 .monitor-fit .monitor-row > span {
   min-width: 0;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: clamp(13px, 0.82vw, 15px);
+  line-height: 1.4;
 }
 .monitor-fit .monitor-row > span:last-child {
   overflow-wrap: anywhere;
 }
 .monitor-fit .monitor-spark {
-  height: 30px;
+  height: clamp(34px, 4vh, 64px);
 }
 .monitor-fit #split-legend {
-  margin-top: 8px;
-  row-gap: 4px;
+  margin-top: 12px;
+  row-gap: 8px;
 }
 .monitor-fit #split-note,
 .monitor-fit #gpu-total-w {
-  margin-top: 7px;
+  margin-top: 10px;
 }
 .monitor-fit #slots,
 .monitor-fit #gpus > div {
-  gap: 8px;
+  gap: 12px;
 }
 .monitor-fit .monitor-slot,
 .monitor-fit .monitor-gpu {
-  padding: 10px;
+  padding: clamp(14px, 1.5vh, 24px);
 }
 .monitor-fit .monitor-slot > div:first-child,
 .monitor-fit .monitor-slot > p,
 .monitor-fit .monitor-gpu > div:first-child {
-  margin-bottom: 7px;
+  margin-bottom: 10px;
 }
 .monitor-fit .monitor-gpu > .space-y-3 {
-  row-gap: 5px;
+  row-gap: 8px;
 }
 .monitor-fit .monitor-gpu > .mt-4 {
-  margin-top: 8px;
+  margin-top: 12px;
 }
 @media (min-width: 1280px) {
+  .monitor-fit .monitor-summary {
+    min-height: 155px;
+    flex: 0.65;
+  }
   .monitor-fit .monitor-panels {
+    min-height: 460px;
+    flex: 2.6;
     grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-rows: minmax(200px, 1fr) minmax(250px, 1.4fr);
+  }
+  .monitor-fit .monitor-panel,
+  .monitor-fit .monitor-decode,
+  .monitor-fit .monitor-gpu,
+  .monitor-fit .monitor-slot {
+    display: flex;
+    flex-direction: column;
+  }
+  .monitor-fit .monitor-panel-content {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+  .monitor-fit .monitor-throughput .monitor-panel-content,
+  .monitor-fit .monitor-session .monitor-panel-content {
+    justify-content: space-between;
+  }
+  .monitor-fit .monitor-gpus #gpus,
+  .monitor-fit .monitor-slots #slots {
+    flex: 1;
+  }
+  .monitor-fit #gpus > div {
+    height: 100%;
+  }
+  .monitor-fit .monitor-gpu > .space-y-3 {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: space-around;
+  }
+  .monitor-fit .monitor-gpu > .space-y-3 > div {
+    flex: 1;
+  }
+  .monitor-fit .monitor-memory #sysmem {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+  }
+  .monitor-fit .monitor-memory #sysmem .monitor-spark {
+    margin-top: auto;
+    margin-bottom: auto;
+  }
+  .monitor-fit .monitor-slot > [role='progressbar'] {
+    margin-top: auto;
   }
   .monitor-fit .monitor-session,
   .monitor-fit .monitor-throughput,
@@ -203,6 +285,119 @@ button:disabled {
   .monitor-fit .monitor-gpus {
     grid-row: 2;
     grid-column: span 8;
+  }
+}
+@media (max-width: 1279px) {
+  .monitor-fit {
+    flex: none;
+  }
+}
+@media (min-width: 1280px) and (max-height: 1100px) {
+  .monitor-fit .monitor-summary {
+    min-height: 145px;
+  }
+  .monitor-fit .monitor-panels {
+    min-height: 457px;
+    grid-template-rows: minmax(190px, 1fr) minmax(255px, 1.4fr);
+  }
+  .monitor-fit .monitor-feature {
+    padding: 15px 19px;
+  }
+  .monitor-fit .monitor-hero h2 {
+    font-size: clamp(1.5rem, 1.8vw, 2rem);
+  }
+  .monitor-fit .monitor-hero .mt-7 {
+    margin-top: 10px;
+  }
+  .monitor-fit .monitor-hero .mt-7 > * {
+    padding: 3px 9px;
+  }
+  .monitor-fit .monitor-decode .metric {
+    font-size: 2.4rem;
+  }
+  .monitor-fit .monitor-decode .monitor-spark {
+    height: 32px;
+  }
+  .monitor-fit .monitor-panel-header {
+    padding: 12px 16px 4px;
+  }
+  .monitor-fit .monitor-panel-content {
+    padding: 0 16px 12px;
+  }
+  .monitor-fit .monitor-row {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .monitor-fit .monitor-row > span {
+    font-size: 12.5px;
+  }
+  .monitor-fit .monitor-spark {
+    height: 28px;
+  }
+  .monitor-fit .monitor-slot,
+  .monitor-fit .monitor-gpu {
+    padding: 10px;
+  }
+  .monitor-fit .monitor-gpu > .space-y-3 {
+    row-gap: 5px;
+  }
+}
+@media (min-width: 2200px) and (min-height: 1300px) {
+  .monitor-fit .monitor-summary {
+    min-height: clamp(220px, 17vh, 320px);
+    flex: 0 0 auto;
+  }
+  .monitor-fit .monitor-panels {
+    min-height: 815px;
+    flex: 1;
+    grid-template-rows: minmax(255px, 0.8fr) minmax(170px, 0.52fr) minmax(
+        370px,
+        1.6fr
+      );
+  }
+  .monitor-fit .monitor-slots {
+    grid-row: 2;
+    grid-column: span 12;
+  }
+  .monitor-fit .monitor-gpus {
+    grid-row: 3;
+    grid-column: span 12;
+  }
+  .monitor-fit #slots {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (min-width: 2200px) and (min-height: 1700px) {
+  .monitor-fit .monitor-hero h2 {
+    font-size: clamp(2.5rem, 2vw, 3.25rem);
+  }
+  .monitor-fit .monitor-decode .metric {
+    font-size: 4.25rem;
+  }
+  .monitor-fit .monitor-feature p.text-xs,
+  .monitor-fit .monitor-panel .text-xs {
+    font-size: 1.15rem;
+  }
+  .monitor-fit .monitor-feature p.text-sm,
+  .monitor-fit .monitor-panel .text-sm,
+  .monitor-fit .monitor-panel-header .text-sm {
+    font-size: 1.3rem;
+  }
+  .monitor-fit .monitor-row > span {
+    font-size: 1.25rem;
+  }
+  .monitor-fit .monitor-slot strong,
+  .monitor-fit .monitor-gpu strong {
+    font-size: 1.3rem;
+  }
+  .monitor-fit .monitor-gpu .monitor-spark {
+    height: clamp(75px, 6.5vh, 130px);
+  }
+  .monitor-fit .monitor-memory .monitor-spark {
+    height: clamp(110px, 10vh, 180px);
+  }
+  .monitor-fit .monitor-decode .monitor-spark {
+    height: clamp(55px, 4vh, 80px);
   }
 }
 .metric {
