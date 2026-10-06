@@ -23,6 +23,7 @@ from typing import Callable, Optional
 
 import store
 import flags as flags_mod
+from processes import capture_process, identity_matches, same_path, terminate_verified
 
 try:
     import psutil  # used to re-adopt / stop a server across dashboard restarts
@@ -108,6 +109,7 @@ class ServerManager:
         # PID of a server adopted from a previous dashboard run (we have no Popen
         # handle for it, so it's managed via psutil instead of self._proc).
         self._adopted_pid: Optional[int] = None
+        self._identity: Optional[dict] = None
         self.current: Optional[dict] = None   # the config we launched
         self.started_at: Optional[float] = None
         self.exit_code: Optional[int] = None
@@ -123,9 +125,11 @@ class ServerManager:
         if self._proc is not None and self._proc.poll() is not None:
             self.exit_code = self._proc.returncode
             self._proc = None
+            self._identity = None
+            store.set_running(None)
         # An adopted server (no Popen handle) that has since died -> forget it
         # and drop the persisted record so we don't keep reporting "running".
-        if self._adopted_pid is not None and not _process_alive(self._adopted_pid):
+        if self._adopted_pid is not None and not identity_matches(self._identity):
             self._adopted_pid = None
             store.set_running(None)
 
@@ -166,13 +170,32 @@ class ServerManager:
         if not _process_alive(pid):
             store.set_running(None)
             return None
+        # Upgrade legacy records only after checking their executable, launch
+        # time and model. Never adopt a reused numeric PID merely by name.
+        try:
+            actual = capture_process(pid)
+            if rec.get("identity"):
+                valid = identity_matches(rec["identity"])
+            else:
+                config = rec.get("config") or {}
+                valid = (same_path(actual["executable"], resolve_binary(store.get_settings().get("llama_server_path")))
+                         and abs(actual["created_at"] - rec.get("started_at", 0)) < 2
+                         and config.get("model_path") in actual["argv"])
+            if not valid:
+                store.set_running(None)
+                return None
+        except Exception as exc:
+            self.last_error = f"Cannot verify previously launched server: {exc}"
+            return None
+        rec["identity"] = actual
         if not rec.get("run_id"):
             rec["run_id"] = uuid.uuid4().hex
-            store.set_running(rec)
+        store.set_running(rec)
         with self._lock:
             self.current = rec.get("config")
             self.started_at = rec.get("started_at")
             self._adopted_pid = pid
+            self._identity = actual
             self.exit_code = None
             self._stopped_by_user = False
         return rec
@@ -202,9 +225,9 @@ class ServerManager:
 
     # -- lifecycle ---------------------------------------------------------- #
 
-    def launch(self, config: dict) -> dict:
+    def launch(self, config: dict, *, _snapshot: Optional[dict] = None) -> dict:
         settings = store.get_settings()
-        binary = resolve_binary(settings.get("llama_server_path"))
+        binary = resolve_binary(_snapshot["executable"] if _snapshot else settings.get("llama_server_path"))
         if not binary:
             raise LaunchError(
                 "llama-server executable not found — set its path before launching."
@@ -226,7 +249,8 @@ class ServerManager:
             raise LaunchError("Port must be between 1 and 65535.")
         config = {**config, "port": port}
 
-        argv = self.build_argv(config, binary)
+        argv = list(_snapshot["argv"]) if _snapshot else self.build_argv(config, binary)
+        cwd = _snapshot["cwd"] if _snapshot else os.path.dirname(binary) or None
 
         with self._lock:
             self._refresh()
@@ -245,7 +269,7 @@ class ServerManager:
                     argv,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
-                    cwd=os.path.dirname(binary) or None,
+                    cwd=cwd,
                     creationflags=_DETACH_FLAGS,
                     **_DETACH_KW,
                 )
@@ -259,6 +283,12 @@ class ServerManager:
             self.exit_code = None
             self.last_error = None
             self._stopped_by_user = False
+            try:
+                self._identity = capture_process(self._proc.pid)
+            except Exception:
+                # An early crash can precede inspection. The Popen handle still
+                # owns the child, but it cannot be adopted without an identity.
+                self._identity = None
             # Persist so a restarted dashboard can re-adopt this server.
             store.set_running({
                 "pid": self._proc.pid,
@@ -267,6 +297,7 @@ class ServerManager:
                 "started_at": self.started_at,
                 "run_id": uuid.uuid4().hex,
                 "log_path": store.MANAGED_LOG,
+                "identity": self._identity,
             })
 
         # Repoint the dashboard at the freshly launched server.
@@ -275,6 +306,7 @@ class ServerManager:
 
     def stop(self) -> dict:
         with self._lock:
+            self._refresh()
             had_server = self._proc is not None or self._adopted_pid is not None
             self._stop_locked()
             if had_server and self._finish_log:
@@ -287,6 +319,8 @@ class ServerManager:
         proc = self._proc
         if proc is not None:
             try:
+                if self._identity and not identity_matches(self._identity) and proc.poll() is None:
+                    raise LaunchError("Managed process identity changed; refusing to signal it.")
                 proc.terminate()
                 try:
                     proc.wait(timeout=_STOP_GRACE_SECS)
@@ -295,27 +329,44 @@ class ServerManager:
                     proc.wait(timeout=_STOP_GRACE_SECS)
             except Exception as e:
                 self.last_error = str(e)
-            finally:
-                self.exit_code = proc.returncode
-                self._proc = None
+                raise LaunchError(f"Failed to stop llama-server: {e}") from e
+            if proc.poll() is None:
+                raise LaunchError("llama-server is still running after termination.")
+            self.exit_code = proc.returncode
+            self._proc = None
+            self._identity = None
             return
         # No Popen handle (a server adopted from a previous run): stop via psutil.
         if self._adopted_pid is not None:
             self._stop_pid(self._adopted_pid)
             self._adopted_pid = None
+            self._identity = None
 
     def _stop_pid(self, pid: int) -> None:
-        if psutil is None:
-            return
         try:
-            p = psutil.Process(pid)
-            p.terminate()
-            try:
-                p.wait(timeout=_STOP_GRACE_SECS)
-            except Exception:
-                p.kill()
+            terminate_verified(self._identity, _STOP_GRACE_SECS)
         except Exception as e:
             self.last_error = str(e)
+            raise LaunchError(f"Failed to stop adopted llama-server: {e}") from e
+
+    def snapshot(self) -> Optional[dict]:
+        with self._lock:
+            self._refresh()
+            pid = self._proc.pid if self._proc else self._adopted_pid
+            if not pid:
+                return None
+            actual = capture_process(pid)
+            if self._identity and not identity_matches(self._identity):
+                raise LaunchError("Managed server identity changed.")
+            return {**actual, "id": "primary", "name": (self.current or {}).get("name") or "Primary model",
+                    "port": self.current["port"], "config": self.current.copy()}
+
+    def restore(self, snapshot: dict) -> dict:
+        self.launch(snapshot["config"], _snapshot=snapshot)
+        current = self.snapshot()
+        if current is None:
+            raise LaunchError("Managed server exited during launch.")
+        return current
 
     def restart(self) -> dict:
         if self.current is None:

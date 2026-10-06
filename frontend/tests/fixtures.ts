@@ -24,6 +24,34 @@ export const launcherState = {
   managed_log: 'C:/test/llama-server.log',
 }
 
+export const gamingState = {
+  enabled: false,
+  phase: 'normal',
+  blocked: false,
+  connected_clients: 0,
+  countdown: null,
+  integration_error: null,
+  servers: [],
+  apollo_url: 'https://localhost:47990',
+  credentials_saved: false,
+  certificate_sha256: null,
+  auxiliary: null,
+  commands: { prepare: 'prepare-command', 'session-ended': 'undo-command' },
+}
+
+export const startupState = {
+  supported: true,
+  installed: false,
+  mode: 'boot',
+  autostart_models: false,
+  models: [],
+  pending: false,
+  last_error: null,
+  last_result: null,
+  task_name: null,
+  log_path: 'C:/test/backend.log',
+}
+
 export const stats = {
   online: true,
   active: true,
@@ -145,6 +173,8 @@ export async function mockApi(
     }
     let body: any
     if (path === '/api/stats') body = stats
+    else if (path === '/api/gaming/state') body = gamingState
+    else if (path === '/api/startup/state') body = startupState
     else if (path === '/api/launcher/state') body = launcherState
     else if (path === '/api/launcher/flags')
       body = {

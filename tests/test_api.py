@@ -227,8 +227,12 @@ def _seed_running_server(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "MANAGED_LOG", str(tmp_path / "llama-server.log"))
     monkeypatch.setattr(store.shutil, "which", lambda name: None)
     monkeypatch.setattr(launcher, "_process_alive", lambda pid: True)
+    identity = {"pid": 4321, "created_at": 1.0, "executable": "C:/bin/llama-server.exe",
+                "argv": ["C:/bin/llama-server.exe"], "cwd": "C:/bin"}
+    monkeypatch.setattr(launcher, "capture_process", lambda pid: identity)
+    monkeypatch.setattr(launcher, "identity_matches", lambda record: True)
     store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1"},
-                       "started_at": 1.0, "log_path": str(tmp_path / "llama-server.log")})
+                       "started_at": 1.0, "identity": identity, "log_path": str(tmp_path / "llama-server.log")})
 
 
 def test_explicit_llama_url_skips_adoption(monkeypatch, tmp_path):

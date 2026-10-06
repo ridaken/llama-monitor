@@ -237,6 +237,37 @@ def test_crash_reports_exited_with_code(good_settings, fake_popen):
     assert status["exit_code"] == 1
 
 
+def test_failed_stop_keeps_process_and_persisted_ownership(good_settings, fake_popen, monkeypatch):
+    mgr = ServerManager(lambda *a: None)
+    mgr.launch({"name": "c1", "model_path": _gguf(good_settings), "port": 9001})
+    def denied():
+        raise PermissionError("access denied")
+    monkeypatch.setattr(fake_popen["proc"], "terminate", denied)
+    with pytest.raises(LaunchError, match="Failed to stop"):
+        mgr.stop()
+    assert mgr.status()["state"] == "running"
+    assert store.get_running()["pid"] == fake_popen["proc"].pid
+
+
+def test_restore_reuses_exact_invocation_despite_settings_changes(good_settings, fake_popen, monkeypatch):
+    def capture(pid):
+        return {"pid": pid, "created_at": 1.0, "executable": sys.executable,
+                "argv": list(fake_popen["argv"]), "cwd": str(good_settings)}
+    monkeypatch.setattr(launcher, "capture_process", capture)
+    monkeypatch.setattr(launcher, "identity_matches", lambda record: True)
+    mgr = ServerManager(lambda *args: None)
+    config = {"name": "unsaved", "model_path": _gguf(good_settings), "port": 9001,
+              "flags": [{"flag": "-c", "value": "12345"}], "log_prompts": False}
+    mgr.launch(config)
+    snapshot = mgr.snapshot()
+    mgr.stop()
+    monkeypatch.setattr(store, "get_settings", lambda: {"llama_server_path": "does-not-exist"})
+    restored = mgr.restore(snapshot)
+    assert fake_popen["argv"] == snapshot["argv"]
+    assert fake_popen["kwargs"]["cwd"] == snapshot["cwd"]
+    assert restored["config"] == config
+
+
 def test_restart_requires_prior_launch():
     mgr = ServerManager(lambda *a: None)
     with pytest.raises(LaunchError, match="Nothing to restart"):
@@ -277,8 +308,12 @@ def test_launch_persists_running_record_and_stop_clears_it(good_settings, fake_p
 def test_adopt_reattaches_to_a_live_server(good_settings, monkeypatch):
     """A restarted dashboard re-adopts a server a previous run launched."""
     monkeypatch.setattr(launcher, "_process_alive", lambda pid: True)
+    identity = {"pid": 4321, "created_at": 1.0, "executable": sys.executable,
+                "argv": [sys.executable], "cwd": str(good_settings)}
+    monkeypatch.setattr(launcher, "capture_process", lambda pid: identity)
+    monkeypatch.setattr(launcher, "identity_matches", lambda record: True)
     store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1"},
-                       "started_at": 1.0, "log_path": str(good_settings / "x.log")})
+                       "started_at": 1.0, "identity": identity, "log_path": str(good_settings / "x.log")})
     captured = []
     mgr = ServerManager(lambda *a: captured.append(a))
 
@@ -306,14 +341,14 @@ def test_stop_adopted_server_terminates_pid_and_clears_record(good_settings, mon
     monkeypatch.setattr(launcher, "_process_alive", lambda pid: True)
     seen = {}
 
-    class FakeP:
-        def __init__(self, pid): seen["pid"] = pid
-        def terminate(self): seen["terminated"] = True
-        def wait(self, timeout=None): return 0
-        def kill(self): seen["killed"] = True
-
-    monkeypatch.setattr(launcher, "psutil", types.SimpleNamespace(Process=FakeP))
-    store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1"}})
+    identity = {"pid": 4321, "created_at": 1.0, "executable": sys.executable,
+                "argv": [sys.executable], "cwd": str(good_settings)}
+    monkeypatch.setattr(launcher, "capture_process", lambda pid: identity)
+    monkeypatch.setattr(launcher, "identity_matches", lambda record: True)
+    def terminate(record, grace):
+        seen.update(pid=record["pid"], terminated=True)
+    monkeypatch.setattr(launcher, "terminate_verified", terminate)
+    store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1"}, "identity": identity})
     mgr = ServerManager(lambda *a: None)
     mgr.adopt()
 

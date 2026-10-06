@@ -12,6 +12,7 @@ import { History } from '@/components/History'
 import { Manage } from '@/components/Manage'
 import { Monitor } from '@/components/Monitor'
 import { useMonitor } from '@/hooks/useMonitor'
+import { gamingLabel } from '@/lib/gaming'
 
 type View = 'monitor' | 'manage' | 'history'
 type MonitorLayout = 'fit' | 'comfortable'
@@ -50,15 +51,17 @@ export default function App() {
   const data = monitor.data
   const online = !!data?.online && !monitor.failed
   const active = !!data?.active
-  const connection = monitor.failed
-    ? 'llama-server unreachable'
-    : !monitor.updatedAt
-      ? 'Connecting…'
-      : online
-        ? data?.metrics_enabled === false
-          ? 'Online · enable --metrics for throughput'
-          : 'llama-server online'
-        : 'llama-server unreachable'
+  const connection =
+    gamingLabel(data?.gaming) ||
+    (monitor.failed
+      ? 'llama-server unreachable'
+      : !monitor.updatedAt
+        ? 'Connecting…'
+        : online
+          ? data?.metrics_enabled === false
+            ? 'Online · enable --metrics for throughput'
+            : 'llama-server online'
+          : 'llama-server unreachable')
   const links: Array<{
     key: View
     label: string

@@ -1,4 +1,45 @@
 export type Flag = { flag: string; value: string; enabled?: boolean }
+export type GamingState = {
+  enabled: boolean
+  reason?: 'startup' | 'gaming' | null
+  phase:
+    | 'normal'
+    | 'stopping'
+    | 'gaming'
+    | 'countdown'
+    | 'restoring'
+    | 'retry_countdown'
+    | 'failed'
+  blocked: boolean
+  connected_clients: number | null
+  countdown: number | null
+  integration_error: string | null
+  servers: Array<{
+    id: string
+    name: string
+    port: number
+    status: string
+    attempts: number
+    error?: string | null
+  }>
+  apollo_url: string
+  credentials_saved: boolean
+  certificate_sha256: string | null
+  auxiliary: { executable: string; port: number } | null
+  commands?: { prepare: string; 'session-ended': string }
+}
+export type StartupState = {
+  supported: boolean
+  installed: boolean
+  mode: 'boot' | 'logon'
+  autostart_models: boolean
+  models: Array<{ id: string; name: string; port: number }>
+  pending: boolean
+  last_error: string | null
+  last_result: string | null
+  task_name: string | null
+  log_path: string
+}
 export type Config = {
   name: string
   model_path: string
@@ -23,6 +64,7 @@ export type LauncherState = {
     adopted?: boolean
   }
   managed_log: string
+  gaming?: GamingState
 }
 export type KnownFlag = {
   flags: string[]
@@ -32,6 +74,7 @@ export type KnownFlag = {
 export type FlagResponse = { source: string; flags: KnownFlag[] }
 export type Stats = {
   online: boolean
+  gaming?: GamingState
   active?: boolean
   log_mode?: boolean
   metrics_enabled?: boolean
