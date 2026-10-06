@@ -12,6 +12,16 @@ and produces a portable package. Every artifact includes `build-manifest.json`,
 Review the package source and verify its checksum before installing. A capability
 field identifies the protocol; the manifest identifies the actual tested build.
 
+Current candidate: Apollo source
+[`565117ee71986c403714e276e969e5db3d200a43`](https://github.com/ridaken/Apollo/commit/565117ee71986c403714e276e969e5db3d200a43),
+version `0.4.6-llama-auth.565117ee`, from
+[Windows build 37533179792](https://github.com/ridaken/Apollo/actions/runs/37533179792).
+Its `Apollo.zip` SHA-256 is
+`d5ced82b492bb0667cf09b6ee0735018459dfe2bccc419e3b33fcd58c1eb9000`.
+Compilation and all six native session tests passed. Installation, real browser
+authentication during polling, and real Moonlight streaming acceptance are still
+pending; this candidate is not yet declared ready for everyday rollout.
+
 The monitor checks compatibility before logging in and refuses stock builds.
 The fork uses independent 30-day sessions, stores only cookie hashes in memory,
 and preserves existing sessions when another client logs in. Password changes
