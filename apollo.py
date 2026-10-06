@@ -56,18 +56,29 @@ def parse_url(url):
     return parsed
 
 
+class _LocalHTTPSConnection(http.client.HTTPSConnection):
+    fingerprint = None
+
+    def connect(self):
+        super().connect()
+        if not ipaddress.ip_address(self.sock.getpeername()[0]).is_loopback:
+            self.close()
+            raise ValueError("Apollo resolved to a nonlocal address; refusing to send credentials.")
+        fingerprint = hashlib.sha256(self.sock.getpeercert(binary_form=True)).hexdigest()
+        # http.client can reconnect internally after a Connection: close. Pin
+        # that new socket too, before it can send the subsequent login payload.
+        if self.fingerprint is not None and self.fingerprint != fingerprint:
+            self.close()
+            raise ValueError("Apollo certificate changed; test and trust the local connection again.")
+        self.fingerprint = fingerprint
+
+
 def _connect(url):
     parsed = parse_url(url)
-    # Authenticate the exact connected TLS socket using its pinned certificate
-    # before sending credentials. Apollo uses a self-signed certificate.
-    connection = http.client.HTTPSConnection(parsed.hostname, parsed.port or 47990,
-                                            timeout=3, context=ssl._create_unverified_context())
+    connection = _LocalHTTPSConnection(parsed.hostname, parsed.port or 47990,
+                                      timeout=3, context=ssl._create_unverified_context())
     connection.connect()
-    if not ipaddress.ip_address(connection.sock.getpeername()[0]).is_loopback:
-        connection.close()
-        raise ValueError("Apollo resolved to a nonlocal address; refusing to send credentials.")
-    fingerprint = hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest()
-    return connection, fingerprint
+    return connection, connection.fingerprint
 
 
 def certificate_fingerprint(url):

@@ -209,3 +209,23 @@ def test_capacity_has_actionable_error(server):
     server.login_status = 503
     with pytest.raises(ValueError, match="sessions are full"):
         apollo.ApolloClient().connected(SETTINGS)
+
+
+@pytest.mark.parametrize("peer,certificate", [("192.168.1.1", b"original"), ("127.0.0.1", b"changed")])
+def test_implicit_tls_reconnect_is_checked(monkeypatch, peer, certificate):
+    class Socket:
+        def getpeername(self):
+            return (peer, 47990)
+
+        def getpeercert(self, **kwargs):
+            return certificate
+
+        def close(self):
+            pass
+
+    connection = apollo._LocalHTTPSConnection("localhost")
+    connection.fingerprint = apollo.hashlib.sha256(b"original").hexdigest()
+    monkeypatch.setattr(apollo.http.client.HTTPSConnection, "connect", lambda self: setattr(self, "sock", Socket()))
+    with pytest.raises(ValueError):
+        connection.connect()
+    assert connection.sock is None
