@@ -33,6 +33,17 @@ function Stream-Sha($Stream) {
     finally { $digest.Dispose() }
 }
 
+function Save-Record($Record, [string]$Path) {
+    $temporary = $Path + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        [IO.File]::WriteAllText($temporary, ($Record | ConvertTo-Json -Depth 7), [Text.UTF8Encoding]::new($false))
+        if ([IO.File]::Exists($Path)) { [IO.File]::Replace($temporary, $Path, $null) }
+        else { [IO.File]::Move($temporary, $Path) }
+    } finally {
+        if ([IO.File]::Exists($temporary)) { Remove-Item -LiteralPath $temporary -Force }
+    }
+}
+
 function Stop-Apollo {
     Stop-Service -Name $ServiceName -ErrorAction Stop
     (Get-Service -Name $ServiceName).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
@@ -137,7 +148,7 @@ if ($Action -eq 'Install') {
         }
         $record = @{ install_path = $InstallPath; service_name = $ServiceName; source_commit = $build.source_commit; entries = $entries; status = 'backed-up' }
         $recordPath = Join-Path $BackupPath 'installation.json'
-        $record | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $recordPath -Encoding utf8
+        Save-Record $record $recordPath
         try {
             Stop-Apollo
             foreach ($entry in $entries) {
@@ -148,14 +159,14 @@ if ($Action -eq 'Install') {
             }
             if ($wasRunning) { Start-Apollo }
             $record.status = 'installed'
-            $record | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $recordPath -Encoding utf8
+            Save-Record $record $recordPath
         } catch {
             $failure = $_
             Stop-Apollo
             Restore-Programs $entries $BackupPath
             if ($wasRunning) { Start-Apollo }
             $record.status = 'rolled-back-after-failure'
-            $record | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $recordPath -Encoding utf8
+            Save-Record $record $recordPath
             throw $failure
         }
         Write-Output "Apollo integration build installed. Source: $($build.source_commit). Backup: $BackupPath"
@@ -182,7 +193,7 @@ if ($Action -eq 'Install') {
     Restore-Programs $record.entries $BackupPath
     if ($wasRunning) { Start-Apollo }
     $record.status = 'rolled-back'
-    $record | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $BackupPath 'installation.json') -Encoding utf8
+    Save-Record $record (Join-Path $BackupPath 'installation.json')
     Write-Output 'Apollo program files restored. Current configuration and pairing were preserved.'
 }
 } finally {

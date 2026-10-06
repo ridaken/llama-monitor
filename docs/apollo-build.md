@@ -47,6 +47,8 @@ limit does not evict existing sessions. The monitor never exports its cookie.
 The installer records backup paths in an installation manifest. If replacement
 or service startup fails, it restores previous program files before returning an
 error. This custom package is unsigned; no official Apollo release is substituted.
+The manifest is replaced atomically and records expected program checksums before
+replacement. The same rollback command can recover an interrupted installation.
 
 ## Rollback
 
