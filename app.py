@@ -234,7 +234,7 @@ def build_app(args) -> FastAPI:
                             raise LaunchError("Restart llama-monitor with plain python app.py before enabling integration.")
                         if not settings.get("credentials") or not settings.get("certificate_sha256"):
                             raise ValueError("Save credentials and test Apollo before enabling integration.")
-                        ApolloClient().connected(settings)
+                        gaming.apollo.connected(settings)
                     changes["enabled"] = body["enabled"]
                 encrypted = settings.get("hook_token") or protect(secrets.token_urlsafe(32))
                 changes["hook_token"] = encrypted
@@ -253,7 +253,7 @@ def build_app(args) -> FastAPI:
                 settings = store.load_state()["gaming"]
                 fingerprint = certificate_fingerprint(settings["apollo_url"])
                 candidate = {**settings, "certificate_sha256": fingerprint}
-                clients = ApolloClient().connected(candidate)
+                clients = gaming.apollo.connected(candidate)
                 store.update_gaming(certificate_sha256=fingerprint)
                 gaming.connected = clients
                 gaming.reconciled = True
