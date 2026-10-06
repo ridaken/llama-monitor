@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import hmac
+import ipaddress
+import json
+import secrets
 import string
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -34,6 +38,11 @@ from collectors import (
 )
 from history import HistoryDB, LogFollower, decode_log_line
 from launcher import LaunchError, ServerManager, resolve_binary
+from gaming import GamingCoordinator
+from apollo import ApolloClient, certificate_fingerprint, parse_url, protect, unprotect
+from apollo_setup import commands as hook_commands, write_hook_config
+from processes import discover_registered
+from instance import backend_lock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(HERE, "static")
@@ -127,19 +136,165 @@ def build_app(args) -> FastAPI:
             retarget(f"http://127.0.0.1:{a_port}",
                      adopted.get("log_path") or store.MANAGED_LOG, a_port)
 
+    gaming = GamingCoordinator(manager)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         follower.start()
+        gaming.start()
         # A launched llama-server is intentionally left running — the user stops
         # it explicitly from the UI.
         try:
             yield
         finally:
+            gaming.close()
             follower.stop()
             rt["llama"].close()
             gpu.shutdown()
 
     app = FastAPI(title="llama-monitor", lifespan=lifespan)
+
+    def local_request(request):
+        try:
+            local = ipaddress.ip_address(request.client.host).is_loopback
+        except (ValueError, AttributeError):
+            local = False
+        origin = request.headers.get("origin")
+        if not local or (origin and origin.rstrip("/") != str(request.base_url).rstrip("/")):
+            raise LaunchError("Gaming controls are available only from the local dashboard.")
+
+    def hook_request(request):
+        local_request(request)
+        encrypted = store.load_state()["gaming"].get("hook_token")
+        if not encrypted or not hmac.compare_digest(
+                request.headers.get("x-llama-monitor-token", ""), unprotect(encrypted)):
+            raise LaunchError("Invalid integration token.")
+
+    def gaming_error(exc, code=409):
+        message = str(exc) if isinstance(exc, (ValueError, LaunchError)) else "Gaming integration operation failed."
+        return JSONResponse({"error": message}, status_code=code)
+
+    @app.get("/api/gaming/state")
+    def gaming_state():
+        return JSONResponse({**gaming.state(), "commands": hook_commands()})
+
+    @app.post("/api/gaming/settings")
+    def gaming_settings(request: Request, body: dict):
+        try:
+            local_request(request)
+            with gaming.lock:
+                if gaming.transition:
+                    raise LaunchError("Finish or cancel the pending transition before changing integration settings.")
+                settings = store.load_state()["gaming"]
+                changes = {}
+                if "apollo_url" in body:
+                    parse_url(body["apollo_url"])
+                    changes["apollo_url"] = body["apollo_url"]
+                    if body["apollo_url"] != settings["apollo_url"]:
+                        changes["certificate_sha256"] = None
+                if body.get("password"):
+                    if not body.get("username") or ":" in body["username"]:
+                        raise ValueError("Enter a valid Apollo username.")
+                    changes["credentials"] = protect(json.dumps({"username": body["username"], "password": body["password"]}))
+                    changes["certificate_sha256"] = None
+                if "enabled" in body:
+                    if not isinstance(body["enabled"], bool):
+                        raise ValueError("enabled must be a boolean.")
+                    if body["enabled"]:
+                        if cli_target_explicit:
+                            raise LaunchError("Restart llama-monitor with plain python app.py before enabling integration.")
+                        if not settings.get("credentials") or not settings.get("certificate_sha256"):
+                            raise ValueError("Save credentials and test Apollo before enabling integration.")
+                        ApolloClient().connected(settings)
+                    changes["enabled"] = body["enabled"]
+                encrypted = settings.get("hook_token") or protect(secrets.token_urlsafe(32))
+                changes["hook_token"] = encrypted
+                port = getattr(args, "port", 8500)
+                write_hook_config(encrypted, port)
+                store.update_gaming(**changes)
+            return gaming_state()
+        except Exception as exc:
+            return gaming_error(exc, 400)
+
+    @app.post("/api/gaming/test")
+    def gaming_test(request: Request):
+        try:
+            local_request(request)
+            with gaming.lock:
+                settings = store.load_state()["gaming"]
+                fingerprint = certificate_fingerprint(settings["apollo_url"])
+                candidate = {**settings, "certificate_sha256": fingerprint}
+                clients = ApolloClient().connected(candidate)
+                store.update_gaming(certificate_sha256=fingerprint)
+                gaming.connected = clients
+                gaming.reconciled = True
+                gaming.integration_error = None
+            return gaming_state()
+        except Exception as exc:
+            return gaming_error(exc, 400)
+
+    @app.post("/api/gaming/auxiliary")
+    def gaming_auxiliary(request: Request, body: dict):
+        try:
+            local_request(request)
+            with gaming.lock:
+                if gaming.transition:
+                    raise LaunchError("Cannot change registered servers during a transition.")
+                port = int(body.get("port", 8081))
+                if not 1 <= port <= 65535 or port == (manager.current or {}).get("port", store.DEFAULT_PORT):
+                    raise ValueError("Choose a valid port different from the managed model.")
+                binary = resolve_binary(store.get_settings().get("llama_server_path"))
+                if not binary:
+                    raise ValueError("Set the llama-server executable first.")
+                record = discover_registered(binary, port)
+                if not record:
+                    raise ValueError("No running llama-server matches this executable and embedding port.")
+                store.update_gaming(auxiliary={"executable": record["executable"], "port": port})
+            return gaming_state()
+        except Exception as exc:
+            return gaming_error(exc, 400)
+
+    @app.post("/api/gaming/prepare")
+    def gaming_prepare(request: Request):
+        try:
+            hook_request(request)
+            if not store.load_state()["gaming"]["enabled"]:
+                return JSONResponse({"enabled": False, "skipped": True})
+            return JSONResponse(gaming.prepare())
+        except Exception as exc:
+            return gaming_error(exc)
+
+    @app.post("/api/gaming/session-ended")
+    def gaming_ended(request: Request):
+        try:
+            hook_request(request)
+            return JSONResponse(gaming.session_ended(), status_code=202)
+        except Exception as exc:
+            return gaming_error(exc)
+
+    @app.post("/api/gaming/retry")
+    def gaming_retry(request: Request):
+        try:
+            local_request(request)
+            return JSONResponse(gaming.retry())
+        except Exception as exc:
+            return gaming_error(exc)
+
+    @app.post("/api/gaming/cancel")
+    def gaming_cancel(request: Request):
+        try:
+            local_request(request)
+            return JSONResponse(gaming.cancel())
+        except Exception as exc:
+            return gaming_error(exc)
+
+    @app.post("/api/gaming/servers/{server_id}/stop")
+    def gaming_stop_server(server_id: str, request: Request):
+        try:
+            local_request(request)
+            return JSONResponse(gaming.stop_server(server_id))
+        except Exception as exc:
+            return gaming_error(exc)
 
     def collect_gated(lite: int):
         """Choose how hard to poll llama-server.
@@ -235,6 +390,14 @@ def build_app(args) -> FastAPI:
             if follower.snapshot()["spec"]:
                 data.setdefault("spec", {})["enabled"] = True
 
+        gaming_status = gaming.state()
+        data["gaming"] = gaming_status
+        primary = next((s for s in gaming_status["servers"] if s["id"] == "primary"), None)
+        if gaming_status["blocked"] and (not primary or primary["status"] != "ready"):
+            for key in ("model", "slots", "requests", "kv", "throughput", "spec", "last_request", "prefill_last"):
+                data.pop(key, None)
+            data.update(online=False, active=False, split=[], split_source=None)
+
         return JSONResponse(data)
 
     @app.get("/api/history")
@@ -268,12 +431,17 @@ def build_app(args) -> FastAPI:
 
     def launcher_state() -> dict:
         settings = store.get_settings()
+        status = manager.status()
+        pending_config = gaming.primary_config()
+        if pending_config:
+            status = {**status, "config": pending_config, "config_name": pending_config.get("name")}
         return {
             "settings": settings,
             "binary_valid": bool(resolve_binary(settings.get("llama_server_path"))),
             "configs": store.list_configs(),
-            "status": manager.status(),
+            "status": status,
             "managed_log": store.MANAGED_LOG,
+            "gaming": gaming.state(),
         }
 
     @app.get("/api/launcher/state")
@@ -415,20 +583,23 @@ def build_app(args) -> FastAPI:
     async def post_launch(request: Request) -> JSONResponse:
         body = await request.json()
         try:
-            manager.launch(body)
+            gaming.launch(body)
         except LaunchError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse(launcher_state())
 
     @app.post("/api/launcher/stop")
     def post_stop() -> JSONResponse:
-        manager.stop()
+        try:
+            gaming.stop_server()
+        except Exception as exc:
+            return gaming_error(exc)
         return JSONResponse(launcher_state())
 
     @app.post("/api/launcher/restart")
     def post_restart() -> JSONResponse:
         try:
-            manager.restart()
+            gaming.launch()
         except LaunchError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse(launcher_state())
@@ -474,12 +645,16 @@ def main() -> None:
     p.add_argument("--host", default="127.0.0.1")
     args = p.parse_args()
 
-    app = build_app(args)
-    print(f"llama-monitor -> dashboard on http://{args.host}:{args.port}")
-    print(f"   initial llama-server target: {args.llama_url}")
-    if args.llama_log:
-        print(f"   reading CPU split from {args.llama_log}")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    try:
+        with backend_lock(store.HOME_DIR):
+            app = build_app(args)
+            print(f"llama-monitor -> dashboard on http://{args.host}:{args.port}")
+            print(f"   initial llama-server target: {args.llama_url}")
+            if args.llama_log:
+                print(f"   reading CPU split from {args.llama_log}")
+            uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    except RuntimeError as exc:
+        p.exit(1, f"{exc}\n")
 
 
 if __name__ == "__main__":

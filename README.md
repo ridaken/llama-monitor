@@ -87,6 +87,114 @@ it; deleting a config also clears it if it was the default.
 > means "watch exactly this" and takes precedence over re-adoption. Single
 > instance: launching replaces any server the panel previously started.
 
+## Automatic Moonlight gaming mode (Windows / Apollo)
+
+The **Manage** view includes a Moonlight integration panel. An incoming streaming
+connection stops the managed model and any registered embedding server, releasing
+their model and KV-cache allocations. Active AI requests are interrupted. After
+the last client disconnects, llama-monitor waits **60 seconds**, then restores
+only the servers that were running before connection, using their captured
+executable, arguments, working directory, models, ports, and unsaved launch settings.
+It does not launch your default configuration instead.
+
+If a load fails, the failed server gets one more attempt after **60 seconds**.
+Successfully restored servers stay running. After the second failure, the
+dashboard reports failure and stops retrying; **Retry failed models** explicitly
+starts another recovery attempt. A game left running is not closed or suspended
+and can prevent AI loading. Configured `--fit` behavior is preserved, so allocation
+and context fitting can still vary with available memory. KV caches and interrupted
+responses are not preserved. LAN AI clients must retry after the servers return.
+
+### Install and validate
+
+1. Restart the backend using **plain `python app.py`**, under the same Windows
+   account Apollo uses for its unelevated application commands. Do not use an
+   explicit watch target or set `LLAMA_URL` to a different URL. The backend must
+   re-adopt the managed process. No sign-in task or model autostart is installed.
+2. In **Manage → Moonlight gaming integration**, enter Apollo's local HTTPS URL
+   (normally `https://localhost:47990`), username, and password. **Save connection**,
+   then **Test and trust local Apollo**. Credentials and the hook token use
+   Windows user-bound DPAPI. The local TLS certificate is pinned before credentials
+   are sent; a changed certificate requires another explicit test. Blank password
+   input preserves the saved credentials.
+3. Start your embedding server if necessary, then **Register running embedding
+   server** on port **8081**. Registration matches the selected llama-server
+   executable and port; it does not control every process named llama-server.
+   It adopts the existing invocation without injecting monitoring flags. The
+   primary model remains on its configured port (normally **8001**).
+4. With no Moonlight streams active, run the installer from this repository using
+   the same Python environment and Windows account, with write permission for
+   Apollo's configuration directory:
+
+   ```powershell
+   python apollo_setup.py --install
+   ```
+
+   The installer backs up `sunshine.conf` and `apps.json` under
+   `~/.llama-monitor/apollo-hook-backup.json`, adds a blocking global preparation
+   command and an undo notification, and enables `terminate-on-pause` on **Desktop**
+   and **Steam Big Picture**. Existing commands are retained. Restart Apollo.
+   Installation leaves the integration disabled.
+   Disabled hooks are harmless no-ops, so ordinary streaming remains available.
+5. **Enable for connection testing**, then test Desktop and Steam Big Picture
+   from a Moonlight client. Confirm both AI processes exit, streaming works, and
+   the original endpoints return after disconnect + 60 seconds. Test reconnecting
+   both during the countdown and after AI has reloaded; test two clients if used.
+   Confirm a failed load receives only one automatic retry. Leave the integration
+   enabled for normal use only after these tests pass.
+
+Apollo 0.4.6's client and resume commands run asynchronously after stream startup.
+The integration therefore uses blocking application preparation and ends the
+streaming application session on final disconnect so reconnects run preparation
+again. Desktop has no game process to terminate; Steam Big Picture's detached
+games remain open, while its existing Big Picture cleanup runs. Apollo probes
+encoders **before** preparation: verify this succeeds with AI loaded on your PC.
+Automated tests do not establish that real GPU/encoder compatibility.
+
+The helper at `scripts/apollo-hook.ps1` starts this backend hidden if it is absent,
+without launching a model. It reads its user-bound token from
+`~/.llama-monitor/apollo-hook.json`; secrets are not passed on command lines.
+The backend reconciles Apollo's connected clients every two seconds independently
+of browser tabs. A connection that never starts streaming gets a 30-second
+reservation before the disconnect countdown begins. Unknown or unauthenticated
+Apollo status holds restoration rather than treating it as zero clients.
+
+**Launch / Restart** are blocked during switching. **Stop** cancels the primary's
+pending restoration; each captured server also has **Stop / cancel restore**.
+Recovery snapshots survive backend restarts. **Cancel automatic restoration**
+forgets the pending retry intent without starting or killing a process.
+
+### Roll back
+
+Finish or cancel a pending transition, then run:
+
+```powershell
+python apollo_setup.py --rollback
+```
+
+Restart Apollo. Rollback disables the integration and restores the original
+configuration bytes. If Apollo configuration was edited after installation,
+automatic rollback refuses to overwrite those newer changes; use the backup to
+remove the inserted global prep command and restore the two applications'
+original pause settings manually. Do not remove other preparation commands.
+
+For a nonstandard installation directory, pass `--config-dir` to `--install`.
+The installer never stops Apollo, a game, or an AI process itself.
+
+### Local integration API
+
+`POST /api/gaming/prepare` blocks until all captured process exits are confirmed;
+failed shutdown returns an error and retains ownership. Both that endpoint and
+`POST /api/gaming/session-ended` require a loopback connection and
+`X-Llama-Monitor-Token`. The latter returns `202` and schedules reconciliation;
+it is not proof that all streams have ended. `GET /api/gaming/state` reports
+phase, connected-client count, countdown, and per-server readiness and errors,
+without raw invocation snapshots or secrets. Local dashboard controls also use
+`POST /api/gaming/settings`, `/test`, `/auxiliary`, `/retry`, `/cancel`, and
+`/servers/{primary|embeddings}/stop`. Launcher state and stats include the same
+public switching status. During gaming GPU/system telemetry stays active while
+stale model allocations and inference gauges are cleared.
+
 ## How it gets the data
 
 | Data | Source |

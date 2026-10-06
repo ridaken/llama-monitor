@@ -42,7 +42,7 @@ PROMPTS_DIR = os.path.join(HOME_DIR, "prompts")
 DEFAULT_PORT = 8001
 
 # Serialise reads/writes so concurrent requests can't corrupt the file.
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
 
 
 def _ensure_dir() -> None:
@@ -66,6 +66,9 @@ def _default_state() -> dict:
         # re-adopt a still-running server instead of losing track of it. None
         # when nothing is launched (or after an explicit Stop).
         "running": None,
+        "gaming": {"enabled": False, "apollo_url": "https://localhost:47990",
+                   "credentials": None, "certificate_sha256": None,
+                   "auxiliary": None, "transition": None},
     }
 
 
@@ -84,7 +87,8 @@ def _normalise(state: dict) -> dict:
     running = state.get("running")
     if not isinstance(running, dict):
         running = None
-    return {"settings": settings, "configs": configs, "running": running}
+    gaming = {**base["gaming"], **(state.get("gaming") or {})}
+    return {"settings": settings, "configs": configs, "running": running, "gaming": gaming}
 
 
 def load_state() -> dict:
@@ -109,6 +113,18 @@ def save_state(state: dict) -> dict:
     return state
 
 
+def update_state(change) -> dict:
+    """Apply a read-modify-write transaction under one lock."""
+    with _LOCK:
+        state = load_state()
+        change(state)
+        return save_state(state)
+
+
+def update_gaming(**changes) -> dict:
+    return update_state(lambda state: state["gaming"].update(changes))["gaming"]
+
+
 # --------------------------------------------------------------------------- #
 # Settings                                                                     #
 # --------------------------------------------------------------------------- #
@@ -119,11 +135,8 @@ def get_settings() -> dict:
 
 def update_settings(**changes) -> dict:
     """Merge the given keys into settings and persist. Returns new settings."""
-    state = load_state()
-    for k, v in changes.items():
-        if v is not None:
-            state["settings"][k] = v
-    return save_state(state)["settings"]
+    return update_state(lambda state: state["settings"].update(
+        {k: v for k, v in changes.items() if v is not None}))["settings"]
 
 
 # --------------------------------------------------------------------------- #
@@ -137,9 +150,7 @@ def get_running() -> Optional[dict]:
 
 def set_running(record: Optional[dict]) -> None:
     """Persist (or clear, with None) the launched-server record."""
-    state = load_state()
-    state["running"] = record if isinstance(record, dict) else None
-    save_state(state)
+    update_state(lambda state: state.update(running=record if isinstance(record, dict) else None))
 
 
 # --------------------------------------------------------------------------- #
@@ -162,20 +173,17 @@ def upsert_config(config: dict) -> list[dict]:
     name = (config.get("name") or "").strip()
     if not name:
         raise ValueError("config name is required")
-    state = load_state()
-    configs = [c for c in state["configs"] if c.get("name") != name]
-    configs.append(config)
-    state["configs"] = configs
-    return save_state(state)["configs"]
+    def change(state):
+        state["configs"] = [c for c in state["configs"] if c.get("name") != name] + [config]
+    return update_state(change)["configs"]
 
 
 def delete_config(name: str) -> list[dict]:
-    state = load_state()
-    state["configs"] = [c for c in state["configs"] if c.get("name") != name]
-    # A deleted config can't be the default any more.
-    if state["settings"].get("default_config") == name:
-        state["settings"]["default_config"] = None
-    return save_state(state)["configs"]
+    def change(state):
+        state["configs"] = [c for c in state["configs"] if c.get("name") != name]
+        if state["settings"].get("default_config") == name:
+            state["settings"]["default_config"] = None
+    return update_state(change)["configs"]
 
 
 def set_default_config(name: Optional[str]) -> dict:
@@ -183,9 +191,9 @@ def set_default_config(name: Optional[str]) -> dict:
 
     Raises ValueError if a non-empty name doesn't match a saved config.
     """
-    state = load_state()
     name = (name or "").strip() or None
-    if name is not None and not any(c.get("name") == name for c in state["configs"]):
-        raise ValueError(f"no such configuration: {name}")
-    state["settings"]["default_config"] = name
-    return save_state(state)["settings"]
+    def change(state):
+        if name is not None and not any(c.get("name") == name for c in state["configs"]):
+            raise ValueError(f"no such configuration: {name}")
+        state["settings"]["default_config"] = name
+    return update_state(change)["settings"]

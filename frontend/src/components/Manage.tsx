@@ -44,6 +44,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { basename } from '@/lib/utils'
+import { Gaming } from '@/components/Gaming'
 import type {
   Config,
   Flag,
@@ -206,7 +207,12 @@ export function Manage() {
         if (!initialized.current) {
           initialized.current = true
           const running = current.status.state === 'running'
-          const runningConfig = running ? current.status.config : null
+          const pendingRestore = current.gaming?.servers.some(
+            (server) =>
+              server.id === 'primary' && server.status !== 'cancelled',
+          )
+          const runningConfig =
+            running || pendingRestore ? current.status.config : null
           if (runningConfig) {
             // Keep the saved config as the baseline so launch-only edits can
             // still be saved, but restore what this server actually launched.
@@ -599,6 +605,10 @@ export function Manage() {
   }, [modal])
 
   const status = state?.status.state || 'stopped'
+  const gamingBlocked = !!state?.gaming?.blocked
+  const pendingPrimary = state?.gaming?.servers.some(
+    (server) => server.id === 'primary' && server.status !== 'cancelled',
+  )
   const statusText =
     status === 'running'
       ? `Running${state?.status.config_name ? ` · ${state.status.config_name}` : ''}`
@@ -632,7 +642,7 @@ export function Manage() {
           <CardContent className="flex flex-wrap gap-2">
             <Button
               id="lx-launch"
-              disabled={!state?.binary_valid}
+              disabled={!state?.binary_valid || gamingBlocked}
               onClick={() => launchAction('launch')}
             >
               <Play />
@@ -641,7 +651,7 @@ export function Manage() {
             <Button
               id="lx-stop"
               variant="secondary"
-              disabled={status !== 'running'}
+              disabled={status !== 'running' && !pendingPrimary}
               onClick={() => launchAction('stop')}
             >
               <Square />
@@ -650,7 +660,7 @@ export function Manage() {
             <Button
               id="lx-restart"
               variant="secondary"
-              disabled={!state?.status.config_name}
+              disabled={!state?.status.config_name || gamingBlocked}
               onClick={() => launchAction('restart')}
             >
               <RotateCcw />
@@ -694,6 +704,7 @@ export function Manage() {
           </CardContent>
         </Card>
       </div>
+      <Gaming />
       <Card className="surface rounded-2xl">
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-3 text-lg">
