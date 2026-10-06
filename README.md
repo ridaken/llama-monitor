@@ -117,6 +117,11 @@ responses are not preserved. LAN AI clients must retry after the servers return.
    Windows user-bound DPAPI. The local TLS certificate is pinned before credentials
    are sent; a changed certificate requires another explicit test. Blank password
    input preserves the saved credentials.
+   Apollo authentication uses its JSON login endpoint and an in-memory `auth`
+   session cookie. Polls reuse that cookie and renew it once if Apollo expires or
+   replaces the session. Apollo 0.4.6 keeps one web UI session: logging in from
+   another browser can invalidate the monitor's cookie, and its renewal can sign
+   that browser out. Moonlight streaming sessions are separate and unaffected.
 3. Start your embedding server if necessary, then **Register running embedding
    server** on port **8081**. Registration matches the selected llama-server
    executable and port; it does not control every process named llama-server.
