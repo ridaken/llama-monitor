@@ -162,3 +162,31 @@ test('gaming panel fits narrow screens', async ({ page }) => {
   }))
   expect(width.scroll).toBeLessThanOrEqual(width.viewport + 1)
 })
+
+test('unsupported Apollo explains the build requirement without enabling integration', async ({
+  page,
+}) => {
+  const calls = await mockApi(page, {
+    'GET /api/gaming/state': () => ({
+      ...gamingState,
+      credentials_saved: true,
+    }),
+    'POST /api/gaming/test': () => ({
+      status: 400,
+      body: {
+        error:
+          'Install the Apollo build with independent authentication sessions. No login was attempted.',
+      },
+    }),
+  })
+  await page.goto('/#manage')
+  await expect(page.locator('#gaming-panel a')).toHaveAttribute(
+    'href',
+    'https://github.com/ridaken/Apollo',
+  )
+  await page.locator('#gaming-test').click()
+  await expect(page.locator('#gaming-message')).toContainText(
+    'No login was attempted',
+  )
+  expect(calls).not.toContain('POST /api/gaming/settings')
+})

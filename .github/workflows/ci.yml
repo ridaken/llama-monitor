@@ -7,6 +7,19 @@ on:
     branches: [main, codex/sqlite-generation-history]
 
 jobs:
+  windows-helpers:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Test Apollo authentication and isolated Windows installation
+        run: python -m pytest -q tests/test_apollo.py tests/test_apollo_build.py
+
   test:
     runs-on: ubuntu-latest
     strategy:

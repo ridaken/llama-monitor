@@ -79,6 +79,19 @@ export function Gaming() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Requires the{' '}
+          <a
+            href="https://github.com/ridaken/Apollo"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            Apollo build with independent authentication sessions
+          </a>
+          . Your Apollo browser login stays separate from background monitoring.
+          Incompatible builds are detected before any login is attempted.
+        </p>
         <p id="gaming-status" role="status" className="text-sm">
           {gamingLabel(state || undefined) ||
             (state?.enabled ? 'Enabled · AI available' : 'Disabled')}
