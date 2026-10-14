@@ -6,6 +6,9 @@ the parsers are the most valuable thing to lock down.
 """
 
 import collectors
+from types import SimpleNamespace
+
+import pytest
 from collectors import (
     LlamaCollector,
     LogTailer,
@@ -260,3 +263,129 @@ def test_log_tailer_handles_truncation(tmp_path):
     log.write_text("fresh\n", encoding="utf-8")
     # Should not crash and should re-read from the top rather than skipping.
     assert tailer.poll() is not None
+
+
+# --------------------------------------------------------------------------- #
+# GPU collection and recovery from stale NVIDIA driver state                   #
+# --------------------------------------------------------------------------- #
+
+class _NvmlError(Exception):
+    def __init__(self, value):
+        self.value = value
+        super().__init__("The operating system has blocked the request.")
+
+
+class _FakeNvml:
+    NVML_ERROR_OPERATING_SYSTEM = 17
+    NVML_ERROR_GPU_IS_LOST = 15
+    NVML_TEMPERATURE_GPU = 0
+
+    def __init__(self, *, recover=True, error=17):
+        self.inits = 0
+        self.shutdowns = 0
+        self.recover = recover
+        self.error = error
+        self.fail_init = False
+
+    def nvmlInit(self):
+        self.inits += 1
+        if self.fail_init:
+            raise _NvmlError(17)
+
+    def nvmlShutdown(self):
+        self.shutdowns += 1
+
+    def nvmlDeviceGetCount(self):
+        return 3
+
+    def nvmlDeviceGetHandleByIndex(self, index):
+        return index
+
+    def nvmlDeviceGetName(self, handle):
+        return f"GPU {handle}"
+
+    def nvmlDeviceGetMemoryInfo(self, handle):
+        if handle > 0 and (not self.recover or self.inits == 1):
+            raise _NvmlError(self.error)
+        return SimpleNamespace(total=16 * 1024**3, used=(handle + 1) * 1024**3)
+
+    def nvmlDeviceGetUtilizationRates(self, handle):
+        return SimpleNamespace(gpu=10, memory=20)
+
+    def nvmlDeviceGetTemperature(self, handle, sensor):
+        return 40
+
+    def nvmlDeviceGetPowerUsage(self, handle):
+        return 50000
+
+    def nvmlDeviceGetEnforcedPowerLimit(self, handle):
+        return 200000
+
+
+def _gpu_collector(monkeypatch, **kwargs):
+    nvml = _FakeNvml(**kwargs)
+    monkeypatch.setattr(collectors, "pynvml", nvml)
+    clock = [100.0]
+    monkeypatch.setattr(collectors.time, "monotonic", lambda: clock[0])
+    return collectors.GpuCollector(), nvml, clock
+
+
+@pytest.mark.parametrize("error", [17, 15])
+def test_gpu_recovers_blocked_secondary_devices_in_same_poll(monkeypatch, error):
+    gpu, nvml, _ = _gpu_collector(monkeypatch, error=error)
+    data = gpu.collect(set())
+    assert data["ok"] is True
+    assert [d["mem_used"] for d in data["devices"]] == [1024**3, 2 * 1024**3, 3 * 1024**3]
+    assert all("error" not in d for d in data["devices"])
+    assert nvml.inits == 2
+    assert nvml.shutdowns == 1  # One reconnect for both failed devices.
+    gpu.collect(set())
+    assert nvml.inits == 2  # Healthy polling keeps the existing connection.
+
+
+def test_gpu_persistent_memory_failure_keeps_other_stats_and_bounds_retries(monkeypatch):
+    gpu, nvml, clock = _gpu_collector(monkeypatch, recover=False)
+    for _ in range(4):
+        data = gpu.collect(set())
+    assert nvml.inits == 2
+    assert data["devices"][0]["mem_used"] == 1024**3
+    for device in data["devices"][1:]:
+        assert "mem_used" not in device
+        assert "error" in device
+        assert device["temp"] == 40
+        assert device["util_gpu"] == 10
+        assert device["power"] == 50
+    clock[0] += 30
+    gpu.collect(set())
+    assert nvml.inits == 3
+
+
+def test_gpu_unsupported_memory_does_not_reconnect(monkeypatch):
+    gpu, nvml, _ = _gpu_collector(monkeypatch, recover=False, error=3)
+    data = gpu.collect(set())
+    assert data["devices"][1]["temp"] == 40
+    assert nvml.inits == 1
+    assert nvml.shutdowns == 0
+
+
+def test_gpu_failed_reconnect_preserves_partial_poll_and_can_retry_later(monkeypatch):
+    gpu, nvml, clock = _gpu_collector(monkeypatch)
+    nvml.fail_init = True
+    data = gpu.collect(set())
+    assert data["devices"][0]["mem_used"] == 1024**3
+    assert gpu.ok is False
+    assert gpu.collect(set())["ok"] is False
+    assert nvml.inits == 2
+    nvml.fail_init = False
+    clock[0] += 30
+    assert all("mem_used" in d for d in gpu.collect(set())["devices"])
+    assert nvml.inits == 3
+
+
+def test_gpu_absent_nvml_is_still_optional(monkeypatch):
+    monkeypatch.setattr(collectors, "pynvml", None)
+    gpu = collectors.GpuCollector()
+    assert gpu.collect(set()) == {
+        "ok": False, "error": "nvidia-ml-py (pynvml) not installed", "devices": [],
+    }
+    gpu.shutdown()
