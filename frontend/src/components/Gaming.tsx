@@ -71,14 +71,14 @@ export function Gaming() {
   const blocked = !!state?.blocked || pending
   return (
     <Card className="surface rounded-2xl" id="gaming-panel">
-      <CardHeader>
+      <CardHeader className="manage-panel-header">
         <CardTitle>Moonlight gaming integration</CardTitle>
         <CardDescription>
           Release AI memory on connection. Restore the previous models after 60
           seconds; retry failed loads once after another 60 seconds.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="manage-panel-content space-y-4">
         <p id="gaming-status" role="status" className="text-sm">
           {gamingLabel(state || undefined) ||
             (state?.enabled ? 'Enabled · AI available' : 'Disabled')}

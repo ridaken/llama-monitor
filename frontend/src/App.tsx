@@ -17,11 +17,11 @@ import { useMonitor } from '@/hooks/useMonitor'
 import { gamingLabel } from '@/lib/gaming'
 
 type View = 'monitor' | 'manage' | 'history'
-type MonitorLayout = 'fit' | 'comfortable'
-const monitorLayoutKey = 'llama-monitor:monitor-layout'
-const readMonitorLayout = (): MonitorLayout => {
+type AppLayout = 'fit' | 'comfortable'
+const appLayoutKey = 'llama-monitor:monitor-layout'
+const readAppLayout = (): AppLayout => {
   try {
-    return localStorage.getItem(monitorLayoutKey) === 'comfortable'
+    return localStorage.getItem(appLayoutKey) === 'comfortable'
       ? 'comfortable'
       : 'fit'
   } catch {
@@ -35,17 +35,16 @@ const readView = (): View => {
 
 export default function App() {
   const [view, setView] = useState<View>(readView)
-  const [monitorLayout, setMonitorLayout] =
-    useState<MonitorLayout>(readMonitorLayout)
+  const [appLayout, setAppLayout] = useState<AppLayout>(readAppLayout)
   const monitor = useMonitor()
   const launcher = useLauncher()
   useEffect(() => {
     try {
-      localStorage.setItem(monitorLayoutKey, monitorLayout)
+      localStorage.setItem(appLayoutKey, appLayout)
     } catch {
       // The layout still works when browser storage is unavailable.
     }
-  }, [monitorLayout])
+  }, [appLayout])
   useEffect(() => {
     const onHash = () => setView(readView())
     window.addEventListener('hashchange', onHash)
@@ -91,7 +90,7 @@ export default function App() {
     },
   ]
   return (
-    <div className="app-shell min-h-dvh bg-background">
+    <div className={`app-shell app-${appLayout} min-h-dvh bg-background`}>
       <header className="sticky top-0 z-40 border-b border-border/70 bg-background/95 backdrop-blur-xl">
         <div className="flex w-full flex-wrap items-center gap-3 px-4 py-1.5 sm:px-6 lg:px-8">
           <a
@@ -195,39 +194,33 @@ export default function App() {
               </a>
             </Button>
           ))}
-          {view === 'monitor' && (
-            <div
-              role="group"
-              aria-label="Monitor layout"
-              className="ml-auto flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1"
-            >
-              {(['fit', 'comfortable'] as const).map((layout) => (
-                <Button
-                  key={layout}
-                  type="button"
-                  size="sm"
-                  variant={monitorLayout === layout ? 'secondary' : 'ghost'}
-                  aria-pressed={monitorLayout === layout}
-                  onClick={() => setMonitorLayout(layout)}
-                  className={
-                    monitorLayout === layout
-                      ? 'accent-glow border border-primary/40 text-primary'
-                      : 'text-muted-foreground'
-                  }
-                >
-                  {layout === 'fit' ? 'Fit' : 'Comfortable'}
-                </Button>
-              ))}
-            </div>
-          )}
+          <div
+            role="group"
+            aria-label="App layout"
+            className="ml-auto flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1"
+          >
+            {(['fit', 'comfortable'] as const).map((layout) => (
+              <Button
+                key={layout}
+                type="button"
+                size="sm"
+                variant={appLayout === layout ? 'secondary' : 'ghost'}
+                aria-pressed={appLayout === layout}
+                onClick={() => setAppLayout(layout)}
+                className={
+                  appLayout === layout
+                    ? 'accent-glow border border-primary/40 text-primary'
+                    : 'text-muted-foreground'
+                }
+              >
+                {layout === 'fit' ? 'Fit' : 'Comfortable'}
+              </Button>
+            ))}
+          </div>
         </nav>
         <main className="app-main">
           <div className="monitor-view" hidden={view !== 'monitor'}>
-            <Monitor
-              monitor={monitor}
-              layout={monitorLayout}
-              launcher={launcher}
-            />
+            <Monitor monitor={monitor} launcher={launcher} />
           </div>
           <div hidden={view !== 'manage'}>
             <Manage launcher={launcher} />

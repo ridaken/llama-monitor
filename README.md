@@ -35,9 +35,14 @@ Designed to run on the **same machine** as llama-server and the GPUs.
 
 The **Monitor** view runs llama-server for
 you, so you don't need a separate launch script. Model and launch controls sit
-above Configuration, alongside live telemetry. Fit keeps the default layout
-compact on desktop; expanding Flags lets the page scroll. Comfortable uses
-more generous spacing. Manage retains executable, Gaming, and startup settings:
+above Configuration, alongside live telemetry. The **Fit / Comfortable** control
+beside the app navigation applies to Monitor, Manage, and History, and remembers
+your choice across reloads. Fit arranges and compacts panels to keep their landing
+content within the desktop viewport where practical. Comfortable uses more generous
+spacing. Expanded Flags, additional details, or smaller windows can make the page
+scroll in either mode. History records always scroll within **Explore records**,
+with filters and pagination outside the records area. Manage retains executable,
+Gaming, and startup settings:
 
 - **Pick the binary** — the path to `llama-server` is auto-detected from your
   `PATH` on first run and shown in the panel. If it can't be found you get a
