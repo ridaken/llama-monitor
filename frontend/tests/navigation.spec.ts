@@ -6,17 +6,18 @@ test('hash navigation keeps an unsaved draft and supports Back', async ({
 }) => {
   await mockApi(page)
   await page.goto('/')
-  await page.locator('#manage-open').click()
   await page.locator('#lx-name').fill('Edited name')
+  await page.locator('#manage-open').click()
   await page.locator('#history-open').click()
   await expect(page).toHaveURL(/#history$/)
   await page.goBack()
   await expect(page).toHaveURL(/#manage$/)
+  await page.getByRole('link', { name: 'Monitor', exact: true }).click()
   await expect(page.locator('#lx-name')).toHaveValue('Edited name')
   await expect(page.locator('#lx-dirty-mark')).toBeVisible()
 })
 
-test('manage actions and default setting keep server state visible', async ({
+test('monitor actions and default setting keep server state visible', async ({
   page,
 }) => {
   const calls = await mockApi(page, {
@@ -25,7 +26,7 @@ test('manage actions and default setting keep server state visible', async ({
       settings: { ...launcherState.settings, default_config: null },
     }),
   })
-  await page.goto('/#manage')
+  await page.goto('/#monitor')
   await expect(page.locator('#lx-default')).toContainText('Default')
   await page.locator('#lx-default').click()
   await expect
@@ -41,11 +42,16 @@ test('manage actions and default setting keep server state visible', async ({
   await expect.poll(() => calls.includes('POST /api/launcher/stop')).toBe(true)
 })
 
-test('flag descriptions, collapse preference and keyboard entry work', async ({
+test('flag descriptions, collapsed default and keyboard entry work', async ({
   page,
 }) => {
   await mockApi(page)
-  await page.goto('/#manage')
+  await page.goto('/#monitor')
+  await expect(page.locator('#lx-flags-label')).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  )
+  await page.locator('#lx-flags-label').click()
   await expect(page.locator('.lx-flag-row').first()).toContainText(
     'Context size',
   )
@@ -80,6 +86,9 @@ test('navigation, help and dialogs work from the keyboard', async ({
   await manage.focus()
   await page.keyboard.press('Enter')
   await expect(manage).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('#lx-bin-browse')).toBeVisible()
+  await expect(page.getByText('Configuration', { exact: true })).toBeHidden()
+  await page.getByRole('link', { name: 'Monitor', exact: true }).click()
   await page.locator('#lx-delete').click()
   await expect(page.getByRole('dialog')).toContainText('Delete configuration?')
   await page.keyboard.press('Escape')
@@ -125,8 +134,9 @@ test('narrow viewport keeps navigation and primary information accessible', asyn
   ).toBeVisible()
   await expect(page.locator('#s-model')).toBeVisible()
   await expect(page.locator('#t-decode')).toBeVisible()
-  await page.locator('#manage-open').click()
   await expect(page.locator('#lx-launch')).toBeVisible()
+  await page.locator('#manage-open').click()
+  await expect(page.locator('#lx-bin-browse')).toBeVisible()
   await page.locator('#history-open').click()
   await expect(page.locator('#history-state')).toBeVisible()
   expect(
@@ -158,7 +168,7 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
       Math.max(...panels.map((panel) => panel.getBoundingClientRect().bottom)),
     )
   expect(panelBottom).toBeLessThanOrEqual(900)
-  expect(panelBottom).toBeGreaterThan(850)
+  await expect(page.locator('#configuration-panel')).toBeVisible()
   for (const [width, height] of [
     [1440, 900],
     [1920, 1080],
@@ -175,16 +185,32 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
       .evaluate((panel) => panel.getBoundingClientRect().bottom)
     expect(bottom).toBeGreaterThan(height * 0.88)
     expect(bottom).toBeLessThanOrEqual(height)
-    const rowsOverlap = await page.evaluate(() => {
-      const features = [...document.querySelectorAll('.monitor-feature')]
-      const panels = document.querySelector('.monitor-panels')!
-      return features.some(
-        (feature) =>
-          feature.getBoundingClientRect().bottom >
-          panels.getBoundingClientRect().top,
-      )
+    const layout = await page.evaluate(() => {
+      const controls = document
+        .querySelector('.monitor-controls')!
+        .getBoundingClientRect()
+      const telemetry = document
+        .querySelector('.monitor-telemetry')!
+        .getBoundingClientRect()
+      const sections = [
+        ...document.querySelectorAll(
+          '.monitor-panel, .monitor-feature, #configuration-panel',
+        ),
+      ]
+      return {
+        separated: controls.right <= telemetry.left,
+        bottom: Math.max(
+          ...sections.map((el) => el.getBoundingClientRect().bottom),
+        ),
+        overflow: document.documentElement.scrollWidth > innerWidth + 1,
+      }
     })
-    expect(rowsOverlap).toBe(false)
+    expect(layout.separated).toBe(true)
+    expect(layout.bottom).toBeLessThanOrEqual(height)
+    expect(layout.overflow).toBe(false)
+    expect(
+      await page.evaluate(() => document.documentElement.scrollHeight),
+    ).toBeLessThanOrEqual(height)
   }
 
   await page.getByRole('button', { name: 'Comfortable' }).click()
@@ -284,7 +310,7 @@ test('save as new during a guarded switch preserves the saved draft', async ({
       return { configs: [config, saved] }
     },
   })
-  await page.goto('/#manage')
+  await page.goto('/#monitor')
   await page.locator('#lx-model').fill('C:/Models/second.gguf')
   await page.locator('#lx-config').click()
   await page.getByRole('option', { name: 'New configuration' }).click()
@@ -347,7 +373,7 @@ test('saved configuration does not warn merely because a server is running', asy
       status: { state: 'running', config_name: config.name },
     }),
   })
-  await page.goto('/#manage')
+  await page.goto('/#monitor')
   await expect(page.locator('#lx-config')).toContainText(config.name)
   const warned = await page.evaluate(() => {
     const event = new Event('beforeunload', { cancelable: true })
@@ -372,7 +398,7 @@ test('older saved configurations load with current form defaults', async ({
       configs: [older],
     }),
   })
-  await page.goto('/#manage')
+  await page.goto('/#monitor')
   await expect(page.locator('#lx-config')).toContainText('Older model')
   await expect(page.locator('#lx-port')).toHaveValue('8001')
   await expect(page.locator('#lx-log-prompts')).not.toBeChecked()
@@ -387,8 +413,9 @@ test('built page works with the real isolated FastAPI API', async ({
   await expect(page.locator('#status')).toContainText('unreachable', {
     timeout: 20_000,
   })
+  await expect(page.locator('#lx-launch')).toBeVisible()
   await page.locator('#manage-open').click()
-  await expect(page.getByText('Launch & manage')).toBeVisible()
+  await expect(page.locator('#lx-bin-browse')).toBeVisible()
   await page.locator('#history-open').click()
   await expect(page.locator('#history-open')).toHaveAttribute(
     'aria-current',

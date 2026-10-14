@@ -33,13 +33,16 @@ Designed to run on the **same machine** as llama-server and the GPUs.
 
 ## Launch & manage llama-server
 
-The **Manage** view runs llama-server for
-you, so you don't need a separate launch script:
+The **Monitor** view runs llama-server for
+you, so you don't need a separate launch script. Model and launch controls sit
+above Configuration, alongside live telemetry. Fit keeps the default layout
+compact on desktop; expanding Flags lets the page scroll. Comfortable uses
+more generous spacing. Manage retains executable, Gaming, and startup settings:
 
 - **Pick the binary** — the path to `llama-server` is auto-detected from your
   `PATH` on first run and shown in the panel. If it can't be found you get a
-  warning and a Browse button to point at the executable. Your choice is
-  persisted across sessions.
+  warning linking to **Manage**, where Browse lets you pick the executable.
+  Your choice is persisted across sessions.
 - **Pick a model** — paste a path to a `.gguf` or **Browse** the filesystem.
 - **Set flags** — add flags from the dropdown, which lists **every flag your
   installed llama-server supports** (parsed live from `llama-server --help`,
@@ -47,8 +50,8 @@ you, so you don't need a separate launch script:
   description next to it — whether picked from the dropdown or typed as a custom
   flag — and its value hint becomes the input placeholder. The Flags section
   **collapses** (click the Flags label) to free up dashboard space; collapsed
-  it shows the currently-set flags as a read-only list — expand it to edit. The
-  collapsed/expanded choice is remembered across sessions.
+  it shows a short preview and count — expand it to edit the complete list.
+  Flags start collapsed on each dashboard load.
 - **Console** — the **Console** button opens a live, auto-scrolling view of
   llama-server's console output (it tails the server's log file).
 - **Port** — defaults to `8001`; change it if you like, but it can't be removed
@@ -78,7 +81,7 @@ it; deleting a config also clears it if it was the default.
 
 > A launched server is left running when you close the dashboard — it's spawned
 > detached, so killing/Ctrl+C-ing the dashboard (or closing its console) does
-> **not** take the server down. Stop it explicitly from Manage. Closing or
+> **not** take the server down. Stop it explicitly from Monitor. Closing or
 > reloading the tab prompts only when configuration edits are unsaved; the server
 > keeps running either way.
 > If you restart the dashboard while a launched server is still running, it
@@ -339,7 +342,7 @@ python app.py
 # open http://localhost:8500
 ```
 
-Then use the **Manage** view to start llama-server (see above). That's
+Then use the **Monitor** view to start llama-server (see above). That's
 the simplest path — the panel sets `--metrics` and `--log-file` for you.
 
 The built React interface is included in `static/app`, so running the dashboard
