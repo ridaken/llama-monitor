@@ -214,7 +214,7 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
   }
 
   await page.getByRole('button', { name: 'Comfortable' }).click()
-  await expect(page.locator('.monitor-comfortable')).toBeVisible()
+  await expect(page.locator('.app-comfortable')).toBeVisible()
   await page.reload()
   await expect(
     page.getByRole('button', { name: 'Comfortable' }),

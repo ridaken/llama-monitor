@@ -197,11 +197,9 @@ const timing = (value?: Timing, rate = true) =>
 
 export function Monitor({
   monitor,
-  layout,
   launcher,
 }: {
   monitor: MonitorData
-  layout: 'fit' | 'comfortable'
   launcher: LauncherController
 }) {
   const { data: d, samples } = monitor
@@ -229,7 +227,7 @@ export function Monitor({
   const splitTotal = split.reduce((sum, item) => sum + item.bytes, 0)
   return (
     <TooltipProvider delayDuration={150}>
-      <div className={`monitor-layout monitor-${layout}`}>
+      <div className="monitor-layout">
         <div className="monitor-controls">
           <div className="surface subtle-grid monitor-feature monitor-hero relative overflow-hidden rounded-2xl p-6 sm:p-8">
             <div className="absolute -right-20 -top-28 size-64 rounded-full bg-primary/10 blur-3xl" />
