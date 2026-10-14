@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import os
 import re
+import threading
 import time
 from typing import Optional
 
@@ -367,7 +368,14 @@ class LlamaCollector:
 # --------------------------------------------------------------------------- #
 
 class GpuCollector:
+    # NVML can retain unusable device state after Windows driver transitions.
+    # Serialize collection with reconnect/shutdown and avoid retrying a blocked
+    # driver on every dashboard poll.
+    _RECONNECT_INTERVAL = 30.0
+
     def __init__(self):
+        self._lock = threading.Lock()
+        self._last_reconnect = float("-inf")
         self.ok = False
         self.error: Optional[str] = None
         if pynvml is None:
@@ -380,23 +388,62 @@ class GpuCollector:
             self.error = f"NVML init failed: {e}"
 
     def collect(self, llama_pids: set[int]) -> dict:
-        if not self.ok:
-            return {"ok": False, "error": self.error, "devices": []}
+        with self._lock:
+            if not self.ok:
+                self._reconnect()
+            if not self.ok:
+                return {"ok": False, "error": self.error, "devices": []}
+            data, reconnect = self._collect(llama_pids)
+            if reconnect and self._reconnect():
+                data, _ = self._collect(llama_pids)
+            return data
 
+    def _reconnect(self) -> bool:
+        now = time.monotonic()
+        if pynvml is None or now - self._last_reconnect < self._RECONNECT_INTERVAL:
+            return False
+        self._last_reconnect = now
+        if self.ok:
+            try:
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
+        self.ok = False
+        try:
+            pynvml.nvmlInit()
+            self.ok = True
+            self.error = None
+        except Exception as exc:
+            self.error = f"NVML init failed: {exc}"
+        return self.ok
+
+    @staticmethod
+    def _connection_error(exc: Exception) -> bool:
+        return getattr(exc, "value", None) in (
+            pynvml.NVML_ERROR_OPERATING_SYSTEM,
+            pynvml.NVML_ERROR_GPU_IS_LOST,
+        )
+
+    def _collect(self, llama_pids: set[int]) -> tuple[dict, bool]:
         devices = []
+        reconnect = False
         try:
             count = pynvml.nvmlDeviceGetCount()
         except Exception as e:
-            return {"ok": False, "error": str(e), "devices": []}
+            return {"ok": False, "error": str(e), "devices": []}, self._connection_error(e)
 
         for i in range(count):
             d: dict = {"index": i}
             try:
                 h = pynvml.nvmlDeviceGetHandleByIndex(i)
                 d["name"] = _decode(pynvml.nvmlDeviceGetName(h))
-                mem = pynvml.nvmlDeviceGetMemoryInfo(h)
-                d["mem_total"] = mem.total
-                d["mem_used"] = mem.used
+                try:
+                    mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+                    d["mem_total"] = mem.total
+                    d["mem_used"] = mem.used
+                except Exception as e:
+                    d["error"] = str(e)
+                    reconnect |= self._connection_error(e)
                 try:
                     util = pynvml.nvmlDeviceGetUtilizationRates(h)
                     d["util_gpu"] = util.gpu
@@ -420,9 +467,10 @@ class GpuCollector:
                 d["llama_mem"] = self._llama_mem_on(h, llama_pids)
             except Exception as e:
                 d["error"] = str(e)
+                reconnect |= self._connection_error(e)
             devices.append(d)
 
-        return {"ok": True, "devices": devices}
+        return {"ok": True, "devices": devices}, reconnect
 
     @staticmethod
     def _llama_mem_on(handle, llama_pids: set[int]) -> Optional[int]:
@@ -449,11 +497,13 @@ class GpuCollector:
         return total if found else None
 
     def shutdown(self) -> None:
-        if self.ok:
-            try:
-                pynvml.nvmlShutdown()
-            except Exception:
-                pass
+        with self._lock:
+            if self.ok:
+                try:
+                    pynvml.nvmlShutdown()
+                except Exception:
+                    pass
+                self.ok = False
 
 
 def _decode(v) -> str:
