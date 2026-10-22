@@ -9,6 +9,8 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { History } from '@/components/History'
+import { LauncherDialogs } from '@/components/Launcher'
+import { useLauncher } from '@/hooks/useLauncher'
 import { Manage } from '@/components/Manage'
 import { Monitor } from '@/components/Monitor'
 import { useMonitor } from '@/hooks/useMonitor'
@@ -36,6 +38,7 @@ export default function App() {
   const [monitorLayout, setMonitorLayout] =
     useState<MonitorLayout>(readMonitorLayout)
   const monitor = useMonitor()
+  const launcher = useLauncher()
   useEffect(() => {
     try {
       localStorage.setItem(monitorLayoutKey, monitorLayout)
@@ -146,7 +149,7 @@ export default function App() {
               {view === 'monitor'
                 ? 'A clear view of what your model and hardware are doing now.'
                 : view === 'manage'
-                  ? 'Launch, tune, and manage your llama-server session.'
+                  ? 'Executable, Gaming integration, and Windows startup settings.'
                   : 'Find past generations and inspect saved prompts.'}
             </p>
           </div>
@@ -220,15 +223,20 @@ export default function App() {
         </nav>
         <main className="app-main">
           <div className="monitor-view" hidden={view !== 'monitor'}>
-            <Monitor monitor={monitor} layout={monitorLayout} />
+            <Monitor
+              monitor={monitor}
+              layout={monitorLayout}
+              launcher={launcher}
+            />
           </div>
           <div hidden={view !== 'manage'}>
-            <Manage />
+            <Manage launcher={launcher} />
           </div>
           <div hidden={view !== 'history'}>
             <History active={view === 'history'} />
           </div>
         </main>
+        <LauncherDialogs launcher={launcher} />
         <footer className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-3 text-xs text-muted-foreground">
           <span>Local llama-server monitoring</span>
           <span>Data stays on this machine</span>

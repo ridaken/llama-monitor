@@ -20,6 +20,18 @@ jobs:
       - name: Test Apollo authentication and isolated Windows installation
         run: python -m pytest -q tests/test_apollo.py tests/test_apollo_build.py
 
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Validate NVIDIA Compose configuration
+        run: docker compose config --quiet
+      - name: Build and exercise CPU Compose installation
+        run: python tests/container_smoke.py
+
   test:
     runs-on: ubuntu-latest
     strategy:

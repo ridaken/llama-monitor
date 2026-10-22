@@ -31,15 +31,133 @@ isn't in use, the section shows a "disabled — MTP not in use" notice instead.
 
 Designed to run on the **same machine** as llama-server and the GPUs.
 
+## Install with Docker Compose (recommended)
+
+Compose builds llama-monitor locally and runs the dashboard and its managed
+llama-server together. Python, Node.js, and a separate llama-server installation
+are not required on the host. NVIDIA acceleration is enabled by default.
+
+**Prerequisites:** Git, Docker with the Compose plugin, and a directory containing
+your `.gguf` models. On Windows, use Docker Desktop's **Linux containers / WSL 2
+backend**, an updated WSL kernel, and an NVIDIA driver with WSL support; see
+[Docker's GPU prerequisites](https://docs.docker.com/desktop/features/gpu/).
+On Linux, configure the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+for Docker. No privileged container or Docker socket mount is needed.
+
+```sh
+git clone https://github.com/ridaken/llama-monitor.git
+cd llama-monitor
+cp .env.example .env
+```
+
+On PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Edit `.env` and
+set `MODELS_DIR` to an **existing** model directory. Windows paths should use
+forward slashes, for example `MODELS_DIR="D:/AI Models"`; Linux might use
+`MODELS_DIR=/srv/models`. Alternatively create a `models` directory in the checkout
+and put your GGUF files there. Models are mounted read-only and are not downloaded
+or copied into the image. On Linux, the directory and model files must be readable
+by the container user (UID/GID 10001).
+
+```sh
+docker compose up --build -d
+```
+
+Open **http://localhost:8500**, select a model under **`/models`**, configure flags,
+and click **Launch**. The Linux llama-server binary is already configured. Use
+container paths such as `/models/qwen.gguf`, including paths in flags for draft
+models or adapters. Windows `.exe` files and arbitrary host paths cannot be used
+inside this Linux container.
+
+The dashboard is also available at `http://<host-LAN-IP>:8500`, and the managed
+server's OpenAI-compatible API at `http://<host-LAN-IP>:8001/v1`. Both ports are
+published on all host interfaces by default. **Use a trusted LAN:** the dashboard
+has no built-in authentication, and connected users can browse container files
+and control the managed server. Do not expose these ports directly to the internet.
+Set `BIND_ADDRESS=127.0.0.1` in `.env` to restrict access to this computer.
+
+`DASHBOARD_PORT` and `INFERENCE_PORT` in `.env` change the **host** ports, including
+when another native installation already uses 8500 or 8001. The internal ports
+remain 8500 and 8001; the launcher fixes its port to 8001 so publishing keeps
+working. Apply port or mount changes with `docker compose up -d`.
+
+### CPU-only installation
+
+Explicitly selecting the base file omits the automatically loaded NVIDIA override
+and builds using the CPU llama.cpp server image:
+
+```sh
+docker compose -f compose.yaml up --build -d
+```
+
+Use the same `-f compose.yaml` selection for subsequent CPU-only commands. CPU
+inference, logs, history, and model controls work without NVIDIA hardware; GPU
+panels will report unavailable. AMD/ROCm and Apple Metal acceleration are not
+included in this setup.
+
+### Container lifecycle, updates, and saved data
+
+- `docker compose logs -f --tail 100` shows backend output; the dashboard's
+  **Console** shows managed llama-server output. Container output rotates at
+  three 10 MB files; managed model logs retain their existing lifecycle.
+- `docker compose stop` stops the dashboard and gracefully stops its model.
+  `docker compose down` also removes the container and network. Closing a browser
+  tab leaves the model running.
+- `docker compose up -d` starts the dashboard again. Saved configurations and
+  history remain, but **models must be launched manually after every container
+  restart**. A default configuration fills the form without loading the model.
+- `restart: unless-stopped` restarts the dashboard after failures and Docker
+  restarts. Configure Docker to start with your operating system separately;
+  this does not automatically launch a model.
+- To update, pull repository changes and run
+  `docker compose build --pull` followed by `docker compose up -d`.
+  The `LLAMA_CPP_IMAGE` build argument, also configurable in `.env`, selects an
+  upstream server image tag or digest. Leave it unset for the standard CPU/CUDA
+  selection. Rebuild after changing it. Images use the upstream
+  [llama.cpp server distribution](https://github.com/ggml-org/llama.cpp/blob/master/docs/docker.md).
+
+The named volume `<compose-project>_monitor-data`, mounted at `/data`, holds
+`state.json`, `history.sqlite` (including WAL files), model logs, and saved prompt
+files. Native `~/.llama-monitor` data is separate and is not automatically
+migrated. Before backing up the volume, stop Compose so the database is idle.
+For example, with an existing `backup` directory and the default project name:
+
+```sh
+docker compose stop
+docker run --rm -v llama-monitor_monitor-data:/data:ro -v "./backup:/backup" busybox:1.37 tar czf /backup/llama-monitor-data.tar.gz -C /data .
+docker compose up -d
+```
+
+Use `docker volume ls` to confirm the actual volume name if the checkout directory
+or Compose project name differs. Restoring into an empty volume should preserve
+the original ownership (UID/GID 10001). `docker compose down --volumes` permanently
+deletes saved settings, history, prompts, and logs; it does not delete host models.
+
+GPU fields depend on NVIDIA's available telemetry; WSL may omit utilization,
+temperature, power, or per-process details. Model memory split uses the managed
+server's logs rather than matching container process IDs against host NVML IDs.
+The image defaults llama.cpp logging to verbosity 4 so allocation details are
+available; lowering verbosity through launch flags can hide those details.
+**Docker system memory** describes RAM visible to the Linux environment (the
+Docker VM on Windows), not Windows host RAM. The reported process RSS belongs to
+the managed container process. No host process namespace is required.
+
+Apollo gaming integration and Windows Task Scheduler setup require the **native
+Windows installation** described below. Their controls explain this limitation
+when running in Docker. The Docker dashboard cannot manage Windows host processes.
+
 ## Launch & manage llama-server
 
-The **Manage** view runs llama-server for
-you, so you don't need a separate launch script:
+The **Monitor** view runs llama-server for
+you, so you don't need a separate launch script. Model and launch controls sit
+above Configuration, alongside live telemetry. Fit keeps the default layout
+compact on desktop; expanding Flags lets the page scroll. Comfortable uses
+more generous spacing. Manage retains executable, Gaming, and startup settings:
 
 - **Pick the binary** — the path to `llama-server` is auto-detected from your
   `PATH` on first run and shown in the panel. If it can't be found you get a
-  warning and a Browse button to point at the executable. Your choice is
-  persisted across sessions.
+  warning linking to **Manage**, where Browse lets you pick the executable.
+  Your choice is persisted across sessions.
 - **Pick a model** — paste a path to a `.gguf` or **Browse** the filesystem.
 - **Set flags** — add flags from the dropdown, which lists **every flag your
   installed llama-server supports** (parsed live from `llama-server --help`,
@@ -47,8 +165,8 @@ you, so you don't need a separate launch script:
   description next to it — whether picked from the dropdown or typed as a custom
   flag — and its value hint becomes the input placeholder. The Flags section
   **collapses** (click the Flags label) to free up dashboard space; collapsed
-  it shows the currently-set flags as a read-only list — expand it to edit. The
-  collapsed/expanded choice is remembered across sessions.
+  it shows a short preview and count — expand it to edit the complete list.
+  Flags start collapsed on each dashboard load.
 - **Console** — the **Console** button opens a live, auto-scrolling view of
   llama-server's console output (it tails the server's log file).
 - **Port** — defaults to `8001`; change it if you like, but it can't be removed
@@ -59,7 +177,7 @@ you, so you don't need a separate launch script:
 
 llama-monitor **injects three flags** at known values so monitoring works:
 `--port <your port>`, `--metrics`, and `--log-file` (pointed at
-`~/.llama-monitor/llama-server.log`). When the installed binary advertises
+  `~/.llama-monitor/llama-server.log`, or `/data/llama-server.log` in Docker). When the installed binary advertises
 `--log-jsonl` and `--log-timestamps`, it enables those too. Older binaries keep
 using text logs. You don't set these yourself.
 
@@ -76,9 +194,9 @@ When you open the dashboard and **no server is running**, the default config is
 loaded into the form automatically, ready to Launch. Click the ★ again to clear
 it; deleting a config also clears it if it was the default.
 
-> A launched server is left running when you close the dashboard — it's spawned
+> With the native installation, a launched server is left running when you close the dashboard — it's spawned
 > detached, so killing/Ctrl+C-ing the dashboard (or closing its console) does
-> **not** take the server down. Stop it explicitly from Manage. Closing or
+> **not** take the server down. Stop it explicitly from Monitor. Closing or
 > reloading the tab prompts only when configuration edits are unsaved; the server
 > keeps running either way.
 > If you restart the dashboard while a launched server is still running, it
@@ -87,7 +205,7 @@ it; deleting a config also clears it if it was the default.
 > means "watch exactly this" and takes precedence over re-adoption. Single
 > instance: launching replaces any server the panel previously started.
 
-## Automatic Moonlight gaming mode (Windows / Apollo)
+## Automatic Moonlight gaming mode (native Windows / Apollo)
 
 For the supported custom Apollo build, package installation, and program-file
 rollback, see [Apollo build and recovery](docs/apollo-build.md).
@@ -293,7 +411,7 @@ For local integrations, `GET /api/history` accepts `model`, `state`, `from_ts`,
 `next_cursor`. `DELETE /api/history` clears saved generations while retaining
 the log cursor. `GET /api/history/{id}/prompt` returns saved text when available.
 
-## Automatic Windows startup
+## Automatic Windows startup (native installation)
 
 Open **Manage → Windows startup** and click **Set up Windows startup**. The app
 creates and verifies the scheduled task for you; no manual Task Scheduler editing
@@ -329,7 +447,10 @@ hooks. Setup refuses to replace an unrelated task. Reapprove boot setup if your
 Windows password changes or the Python/repository paths move. Actual unattended
 boot and GPU availability must be checked after installation and a reboot.
 
-## Setup
+## Native Python installation (alternative)
+
+Use this installation for Windows Apollo integration, Windows startup setup, or
+direct access to host processes and paths. Docker is the primary installation.
 
 ```powershell
 cd C:\Users\Tom\Documents\Repos\llama-monitor
@@ -338,14 +459,14 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-## Run
+### Run
 
 ```powershell
 python app.py
 # open http://localhost:8500
 ```
 
-Then use the **Manage** view to start llama-server (see above). That's
+Then use the **Monitor** view to start llama-server (see above). That's
 the simplest path — the panel sets `--metrics` and `--log-file` for you.
 
 The built React interface is included in `static/app`, so running the dashboard
@@ -394,6 +515,9 @@ python app.py --llama-url http://localhost:8001 --llama-log "C:\Users\Tom\Deskto
 | `--host` | `127.0.0.1` | Bind address |
 
 Env vars `LLAMA_URL`, `LLAMA_LOG`, `LLAMA_PROMPTS_DIR`, and `MONITOR_PORT` are also honored.
+`LLAMA_MONITOR_DATA_DIR` overrides the native `~/.llama-monitor` storage directory.
+The image sets it to `/data` and sets `LLAMA_MONITOR_CONTAINER=1` for container
+behavior; native installations should leave container mode unset.
 
 ## Notes
 

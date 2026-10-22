@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 
 import flags as flags_mod
 import store
+import runtime
 from collectors import (
     GpuCollector,
     LlamaCollector,
@@ -133,7 +134,11 @@ def build_app(args) -> FastAPI:
     # skip adoption entirely and watch exactly what was asked for. A bare
     # `python app.py` (default URL) still auto-reconnects.
     cli_target_explicit = (args.llama_url or "") != DEFAULT_LLAMA_URL
-    if not cli_target_explicit:
+    if runtime.containerized():
+        # Container PID namespaces are recreated; a new container never adopts
+        # a persisted numeric PID or automatically loads a saved model.
+        store.set_running(None)
+    elif not cli_target_explicit:
         adopted = manager.adopt()
         if adopted:
             a_port = adopted.get("port")
@@ -147,20 +152,30 @@ def build_app(args) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         follower.start()
-        gaming.start()
-        # A launched llama-server is intentionally left running — the user stops
-        # it explicitly from the UI.
+        if not runtime.containerized():
+            gaming.start()
+        # Native launches outlive the backend; container launches stop with it.
         try:
             yield
         finally:
             gaming.close()
-            follower.stop()
-            rt["llama"].close()
-            gpu.shutdown()
+            try:
+                if runtime.containerized():
+                    manager.stop()
+            finally:
+                follower.stop()
+                rt["llama"].close()
+                gpu.shutdown()
 
     app = FastAPI(title="llama-monitor", lifespan=lifespan)
 
+    @app.get("/api/health")
+    def health():
+        return {"status": "ok"}
+
     def local_request(request):
+        if runtime.containerized():
+            raise LaunchError("This integration requires the native Windows installation; it is unavailable in Docker.")
         try:
             local = ipaddress.ip_address(request.client.host).is_loopback
         except (ValueError, AttributeError):
@@ -382,8 +397,10 @@ def build_app(args) -> FastAPI:
     def stats(lite: int = 0) -> JSONResponse:
         llama_pids = find_llama_pids(port=rt["port"])
         data = collect_gated(lite)
-        gpu_data = gpu.collect(llama_pids)
+        # NVML reports host PIDs, which cannot be matched safely to container PIDs.
+        gpu_data = gpu.collect(set() if runtime.containerized() else llama_pids)
         data["gpu"] = gpu_data
+        data["runtime"] = runtime.info()
         data["sysmem"] = collect_sysmem(llama_pids)
 
         # Build the memory-split view, best source first:
@@ -471,6 +488,7 @@ def build_app(args) -> FastAPI:
             "status": status,
             "managed_log": store.MANAGED_LOG,
             "gaming": gaming.state(),
+            "runtime": runtime.info(),
         }
 
     @app.get("/api/launcher/state")

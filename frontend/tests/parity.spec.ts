@@ -18,7 +18,7 @@ for (const enabled of [true, false]) {
         },
       }),
     })
-    await page.goto('/#manage')
+    await page.goto('/#monitor')
     await expect(page.locator('#lx-log-prompts')).toBeChecked({
       checked: enabled,
     })
@@ -50,7 +50,7 @@ test('reload restores an unnamed running configuration', async ({ page }) => {
       },
     }),
   })
-  await page.goto('/#manage')
+  await page.goto('/#monitor')
   await expect(page.locator('#lx-log-prompts')).toBeChecked()
   await expect(page.locator('#lx-model')).toHaveValue(config.model_path)
   await expect(page.locator('#lx-port')).toHaveValue('9001')
@@ -68,7 +68,7 @@ test('saved prompt logging survives reload with the server stopped', async ({
       return { configs: [saved] }
     },
   })
-  await page.goto('/#manage')
+  await page.goto('/#monitor')
   await expect(page.locator('#lx-config')).toContainText(config.name)
   for (const enabled of [true, false]) {
     await page.locator('#lx-log-prompts').click()
@@ -139,8 +139,8 @@ test('configuration form preserves flag order and disabled state when saved', as
     },
   })
   await page.goto('/')
-  await page.locator('#manage-open').click()
   await expect(page.locator('#lx-config')).toContainText('Qwen test')
+  await page.locator('#lx-flags-label').click()
   await expect(page.locator('.lx-flag-row')).toHaveCount(2)
   await expect(
     page.locator('.lx-flag-row').nth(1).locator('.lx-en'),
@@ -167,7 +167,6 @@ test('dirty switch guard and file browser keep draft safe', async ({
 }) => {
   const calls = await mockApi(page)
   await page.goto('/')
-  await page.locator('#manage-open').click()
   await page.locator('#lx-model').fill('C:/Models/changed.gguf')
   await expect(page.locator('#lx-dirty-mark')).toBeVisible()
   const warned = await page.evaluate(() => {
@@ -217,9 +216,8 @@ test('launch errors and console tail behavior are visible', async ({
     },
   })
   await page.goto('/')
-  await page.locator('#manage-open').click()
   await page.locator('#lx-launch').click()
-  await expect(page.locator('#lx-msg')).toContainText('Invalid model')
+  await expect(page.locator('#lx-launch-msg')).toContainText('Invalid model')
   await page.locator('#lx-console').click()
   await expect(page.locator('#console-out')).toContainText('first')
   await expect(page.locator('#console-out')).toContainText('rotated')

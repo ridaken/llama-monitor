@@ -123,108 +123,225 @@ button:disabled {
   content: '';
 }
 .monitor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 16px;
+}
+.monitor-controls,
+.monitor-telemetry {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  align-content: start;
+}
+.monitor-controls {
+  grid-template-columns: minmax(0, 1fr);
+}
+.monitor-telemetry {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.monitor-decode,
+.monitor-slots,
+.monitor-gpus {
+  grid-column: 1 / -1;
+}
+.monitor-hero h2 {
+  margin-top: 14px;
+  font-size: clamp(1.5rem, 1.8vw, 2.4rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+.launch-controls {
+  margin-top: 18px;
+}
+.launcher-feedback {
+  overflow-wrap: anywhere;
+}
+.configuration-header {
+  padding: 18px 20px 12px;
+}
+.configuration-content {
+  padding: 0 20px 18px;
+}
+.configuration-content input,
+.configuration-content [role='combobox'] {
+  min-width: 0;
+}
+.configuration-content [role='combobox'] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.configuration-picker > button {
+  padding-right: 10px;
+  padding-left: 10px;
+}
+.configuration-save {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.configuration-save > div:last-child > button {
+  padding-right: 10px;
+  padding-left: 10px;
+}
+.flags-summary > .inline-flex {
+  display: block;
   min-width: 0;
 }
 .monitor-fit {
-  display: flex;
-  flex-direction: column;
   flex: 1;
   gap: 10px;
 }
-.monitor-fit .monitor-summary,
-.monitor-fit .monitor-panels {
+.monitor-fit .monitor-controls,
+.monitor-fit .monitor-telemetry {
   gap: 10px;
 }
 .monitor-fit .monitor-feature {
   min-width: 0;
-  padding: clamp(18px, 2.1vh, 30px) clamp(20px, 2vw, 34px);
-}
-.monitor-fit .monitor-hero > .relative > p:first-child,
-.monitor-fit .monitor-decode > p:first-child {
-  margin-bottom: 10px;
+  padding: 16px 18px;
 }
 .monitor-fit .monitor-hero h2 {
-  font-size: clamp(1.65rem, 2vw, 2.5rem);
-  line-height: 1.1;
-  overflow-wrap: anywhere;
+  margin-top: 10px;
 }
-.monitor-fit .monitor-hero h2 + p {
-  margin-top: 8px;
+.monitor-fit .model-meta {
+  margin-top: 12px;
 }
-.monitor-fit .monitor-hero .mt-7 {
-  margin-top: clamp(14px, 2vh, 26px);
-  gap: 10px;
+.monitor-fit .model-meta > * {
+  padding: 3px 9px;
 }
-.monitor-fit .monitor-hero .mt-7 > * {
-  padding: 5px 11px;
+.monitor-fit .launch-controls {
+  margin-top: 14px;
+}
+.monitor-fit .launch-controls button {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.monitor-fit .configuration-header {
+  padding: 12px 18px 10px;
+}
+.monitor-fit .configuration-content {
+  padding: 0 18px 12px;
+  --configuration-gap: 8px;
+}
+.monitor-fit .configuration-content > :not(:last-child) {
+  margin-block-end: var(--configuration-gap);
+}
+.monitor-fit .configuration-content label {
+  font-size: 12px;
+}
+.monitor-fit .configuration-content input,
+.monitor-fit .configuration-content [role='combobox'],
+.monitor-fit .configuration-content button:not([role='checkbox']) {
+  height: 32px;
+  font-size: 12px;
+}
+.monitor-fit .configuration-content .space-y-2 > :not(:last-child) {
+  margin-block-end: 4px;
+}
+.monitor-fit .configuration-prompts {
+  padding: 8px;
+}
+.monitor-fit .configuration-prompts strong {
+  font-size: 12px;
+}
+.monitor-fit .configuration-save {
+  gap: 8px;
 }
 .monitor-fit .monitor-decode .metric {
-  font-size: clamp(2.5rem, 3vw, 4rem);
+  font-size: clamp(2rem, 2.6vw, 3.5rem);
   line-height: 1.1;
 }
-.monitor-fit .monitor-decode .monitor-spark {
-  height: clamp(36px, 5vh, 90px);
-  margin-top: auto;
-}
 .monitor-fit .monitor-panel-header {
-  padding: clamp(15px, 1.8vh, 26px) clamp(17px, 1.4vw, 28px) 7px;
+  padding: 14px 16px 6px;
 }
 .monitor-fit .monitor-panel-content {
-  padding: 0 clamp(17px, 1.4vw, 28px) clamp(15px, 1.8vh, 26px);
+  padding: 0 16px 14px;
 }
 .monitor-fit .monitor-row {
   gap: 10px;
-  padding-top: clamp(6px, 0.7vh, 12px);
-  padding-bottom: clamp(6px, 0.7vh, 12px);
+  padding: 5px 0;
 }
 .monitor-fit .monitor-row > span {
   min-width: 0;
-  font-size: clamp(13px, 0.82vw, 15px);
+  font-size: 12.5px;
   line-height: 1.4;
 }
 .monitor-fit .monitor-row > span:last-child {
   overflow-wrap: anywhere;
 }
 .monitor-fit .monitor-spark {
-  height: clamp(34px, 4vh, 64px);
+  height: clamp(28px, 3.4vh, 65px);
+}
+.monitor-fit .monitor-decode > p:first-child {
+  margin-bottom: 8px;
 }
 .monitor-fit #split-legend {
   margin-top: 12px;
-  row-gap: 8px;
-}
-.monitor-fit #split-note,
-.monitor-fit #gpu-total-w {
-  margin-top: 10px;
 }
 .monitor-fit #slots,
 .monitor-fit #gpus > div {
-  gap: 12px;
+  gap: 8px;
 }
 .monitor-fit .monitor-slot,
 .monitor-fit .monitor-gpu {
-  padding: clamp(14px, 1.5vh, 24px);
+  min-width: 0;
+  padding: 10px;
 }
 .monitor-fit .monitor-slot > div:first-child,
 .monitor-fit .monitor-slot > p,
 .monitor-fit .monitor-gpu > div:first-child {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
-.monitor-fit .monitor-gpu > .space-y-3 {
-  row-gap: 8px;
+.monitor-fit .monitor-gpu > .space-y-3 > :not(:last-child) {
+  margin-block-end: 6px;
 }
-.monitor-fit .monitor-gpu > .mt-4 {
-  margin-top: 12px;
+.monitor-fit .monitor-gpu > .mt-4,
+.monitor-fit #gpu-total-w {
+  margin-top: 10px;
 }
 @media (min-width: 1280px) {
-  .monitor-fit .monitor-summary {
-    min-height: 155px;
-    flex: 0.65;
+  .monitor-layout {
+    grid-template-columns: clamp(360px, 30vw, 640px) minmax(0, 1fr);
+    align-items: start;
   }
-  .monitor-fit .monitor-panels {
-    min-height: 460px;
-    flex: 2.6;
+  .monitor-fit {
+    align-items: stretch;
+  }
+  .monitor-fit .monitor-controls {
+    align-self: start;
+  }
+  .monitor-telemetry {
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    grid-template-rows: minmax(200px, 1fr) minmax(250px, 1.4fr);
+  }
+  .monitor-fit .monitor-telemetry {
+    align-self: start;
+    align-content: stretch;
+    min-height: max(595px, calc(100dvh - 264px));
+    grid-template-rows: minmax(165px, auto) minmax(180px, auto) minmax(
+        250px,
+        1fr
+      );
+  }
+  .monitor-decode,
+  .monitor-session,
+  .monitor-memory {
+    grid-row: 1;
+    grid-column: span 4;
+  }
+  .monitor-throughput,
+  .monitor-split {
+    grid-row: 2;
+    grid-column: span 6;
+  }
+  .monitor-slots {
+    grid-row: 3;
+    grid-column: span 4;
+  }
+  .monitor-gpus {
+    grid-row: 3;
+    grid-column: span 8;
   }
   .monitor-fit .monitor-panel,
   .monitor-fit .monitor-decode,
@@ -243,12 +360,30 @@ button:disabled {
   .monitor-fit .monitor-session .monitor-panel-content {
     justify-content: space-between;
   }
-  .monitor-fit .monitor-gpus #gpus,
-  .monitor-fit .monitor-slots #slots {
+  .monitor-fit .monitor-decode .monitor-spark,
+  .monitor-fit .monitor-memory .monitor-spark {
+    margin-top: auto;
+    margin-bottom: auto;
+  }
+  .monitor-fit .monitor-memory #sysmem {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+  }
+  .monitor-fit #gpus,
+  .monitor-fit #gpus > div,
+  .monitor-fit #slots {
     flex: 1;
   }
+  .monitor-fit #gpus,
   .monitor-fit #gpus > div {
-    height: 100%;
+    display: grid;
+  }
+  .monitor-fit #slots {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .monitor-fit #gpus > div {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
   }
   .monitor-fit .monitor-gpu > .space-y-3 {
     display: flex;
@@ -256,35 +391,12 @@ button:disabled {
     flex-direction: column;
     justify-content: space-around;
   }
-  .monitor-fit .monitor-gpu > .space-y-3 > div {
-    flex: 1;
-  }
-  .monitor-fit .monitor-memory #sysmem {
-    display: flex;
-    height: 100%;
-    flex-direction: column;
-  }
-  .monitor-fit .monitor-memory #sysmem .monitor-spark {
-    margin-top: auto;
-    margin-bottom: auto;
-  }
   .monitor-fit .monitor-slot > [role='progressbar'] {
     margin-top: auto;
   }
-  .monitor-fit .monitor-session,
-  .monitor-fit .monitor-throughput,
-  .monitor-fit .monitor-split,
-  .monitor-fit .monitor-memory {
-    grid-row: 1;
-    grid-column: span 3;
-  }
-  .monitor-fit .monitor-slots {
-    grid-row: 2;
-    grid-column: span 4;
-  }
-  .monitor-fit .monitor-gpus {
-    grid-row: 2;
-    grid-column: span 8;
+  .monitor-fit .monitor-gpu strong {
+    font-size: 12px;
+    overflow-wrap: anywhere;
   }
 }
 @media (max-width: 1279px) {
@@ -292,112 +404,123 @@ button:disabled {
     flex: none;
   }
 }
+@media (min-width: 1600px) {
+  .monitor-fit #slots {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 @media (min-width: 1280px) and (max-height: 1100px) {
-  .monitor-fit .monitor-summary {
-    min-height: 145px;
-  }
-  .monitor-fit .monitor-panels {
-    min-height: 457px;
-    grid-template-rows: minmax(190px, 1fr) minmax(255px, 1.4fr);
-  }
-  .monitor-fit .monitor-feature {
-    padding: 15px 19px;
-  }
-  .monitor-fit .monitor-hero h2 {
-    font-size: clamp(1.5rem, 1.8vw, 2rem);
-  }
-  .monitor-fit .monitor-hero .mt-7 {
-    margin-top: 10px;
-  }
-  .monitor-fit .monitor-hero .mt-7 > * {
-    padding: 3px 9px;
-  }
-  .monitor-fit .monitor-decode .metric {
-    font-size: 2.4rem;
-  }
-  .monitor-fit .monitor-decode .monitor-spark {
-    height: 32px;
-  }
   .monitor-fit .monitor-panel-header {
     padding: 12px 16px 4px;
   }
   .monitor-fit .monitor-panel-content {
-    padding: 0 16px 12px;
+    padding-bottom: 12px;
   }
   .monitor-fit .monitor-row {
-    padding-top: 4px;
-    padding-bottom: 4px;
-  }
-  .monitor-fit .monitor-row > span {
-    font-size: 12.5px;
+    padding: 4px 0;
   }
   .monitor-fit .monitor-spark {
-    height: 28px;
+    height: 24px;
   }
-  .monitor-fit .monitor-slot,
-  .monitor-fit .monitor-gpu {
-    padding: 10px;
+  .monitor-fit .monitor-decode .metric {
+    font-size: 2.4rem;
   }
-  .monitor-fit .monitor-gpu > .space-y-3 {
-    row-gap: 5px;
+}
+@media (max-width: 639px) {
+  .monitor-telemetry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .configuration-save {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .configuration-picker > button {
+    padding-right: 8px;
+    padding-left: 8px;
   }
 }
 @media (min-width: 2200px) and (min-height: 1300px) {
-  .monitor-fit .monitor-summary {
-    min-height: clamp(220px, 17vh, 320px);
-    flex: 0 0 auto;
+  .monitor-fit {
+    gap: 18px;
   }
-  .monitor-fit .monitor-panels {
-    min-height: 815px;
-    flex: 1;
-    grid-template-rows: minmax(255px, 0.8fr) minmax(170px, 0.52fr) minmax(
-        370px,
-        1.6fr
+  .monitor-fit .monitor-controls,
+  .monitor-fit .monitor-telemetry {
+    gap: 18px;
+  }
+  .monitor-fit .monitor-feature {
+    padding: 26px;
+  }
+  .monitor-fit .monitor-panel-header {
+    padding: 24px 24px 12px;
+  }
+  .monitor-fit .monitor-panel-content {
+    padding: 0 24px 24px;
+  }
+  .monitor-fit .configuration-header {
+    padding: 24px 24px 16px;
+  }
+  .monitor-fit .configuration-content {
+    padding: 0 24px 24px;
+    --configuration-gap: 20px;
+  }
+  .monitor-fit .monitor-row {
+    padding: 10px 0;
+  }
+  .monitor-fit .monitor-row > span {
+    font-size: 15px;
+  }
+  .monitor-fit .monitor-slot,
+  .monitor-fit .monitor-gpu {
+    padding: 18px;
+  }
+  .monitor-fit .launch-controls button,
+  .monitor-fit .configuration-content input,
+  .monitor-fit .configuration-content [role='combobox'],
+  .monitor-fit .configuration-content button:not([role='checkbox']) {
+    height: 38px;
+    font-size: 14px;
+  }
+  .monitor-fit .configuration-content label,
+  .monitor-fit .configuration-prompts strong,
+  .monitor-fit .monitor-gpu strong {
+    font-size: 14px;
+  }
+  .monitor-fit .monitor-telemetry {
+    min-height: calc(100dvh - 320px);
+    grid-template-rows: minmax(210px, auto) minmax(220px, auto) minmax(
+        320px,
+        1fr
       );
   }
-  .monitor-fit .monitor-slots {
-    grid-row: 2;
-    grid-column: span 12;
-  }
-  .monitor-fit .monitor-gpus {
-    grid-row: 3;
-    grid-column: span 12;
-  }
   .monitor-fit #slots {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .monitor-fit .monitor-spark {
+    height: clamp(50px, 5vh, 110px);
   }
 }
 @media (min-width: 2200px) and (min-height: 1700px) {
-  .monitor-fit .monitor-hero h2 {
-    font-size: clamp(2.5rem, 2vw, 3.25rem);
-  }
-  .monitor-fit .monitor-decode .metric {
-    font-size: 4.25rem;
-  }
-  .monitor-fit .monitor-feature p.text-xs,
-  .monitor-fit .monitor-panel .text-xs {
-    font-size: 1.15rem;
-  }
-  .monitor-fit .monitor-feature p.text-sm,
-  .monitor-fit .monitor-panel .text-sm,
-  .monitor-fit .monitor-panel-header .text-sm {
-    font-size: 1.3rem;
-  }
-  .monitor-fit .monitor-row > span {
-    font-size: 1.25rem;
-  }
+  .monitor-fit .monitor-panel-header .text-sm,
+  .monitor-fit .monitor-row > span,
   .monitor-fit .monitor-slot strong,
   .monitor-fit .monitor-gpu strong {
-    font-size: 1.3rem;
+    font-size: 1rem;
   }
-  .monitor-fit .monitor-gpu .monitor-spark {
-    height: clamp(75px, 6.5vh, 130px);
+  .monitor-fit .monitor-feature .text-xs,
+  .monitor-fit .monitor-panel .text-xs,
+  .monitor-fit .configuration-content .text-xs,
+  .monitor-fit .configuration-content label,
+  .monitor-fit .configuration-prompts strong,
+  .monitor-fit .configuration-content input,
+  .monitor-fit .configuration-content [role='combobox'],
+  .monitor-fit .configuration-content button:not([role='checkbox']),
+  .monitor-fit .launch-controls button {
+    font-size: 0.85rem;
   }
-  .monitor-fit .monitor-memory .monitor-spark {
-    height: clamp(110px, 10vh, 180px);
+  .monitor-fit .monitor-panel .text-sm {
+    font-size: 0.95rem;
   }
-  .monitor-fit .monitor-decode .monitor-spark {
-    height: clamp(55px, 4vh, 80px);
+  .monitor-fit .monitor-decode .metric {
+    font-size: 4rem;
   }
 }
 .metric {

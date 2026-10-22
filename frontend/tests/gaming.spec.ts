@@ -37,6 +37,7 @@ for (const [phase, label, countdown] of [
     await page.goto('/#manage')
     await expect(page.locator('#status')).toHaveText(label)
     await expect(page.locator('#gaming-status')).toContainText(label)
+    await page.getByRole('link', { name: 'Monitor', exact: true }).click()
     await expect(page.locator('#lx-launch')).toBeDisabled()
     await expect(page.locator('#lx-restart')).toBeDisabled()
     await expect(page.locator('#lx-stop')).toBeEnabled()
@@ -60,7 +61,7 @@ test('pending unsaved configuration is restored in the form after reload', async
       },
     }),
   })
-  await page.goto('/#manage')
+  await page.goto('/#monitor')
   await expect(page.locator('#lx-port')).toHaveValue('9002')
   await expect(page.locator('#lx-log-prompts')).toBeChecked()
   await expect(page.locator('#lx-dirty-mark')).toBeVisible()

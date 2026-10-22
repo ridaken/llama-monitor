@@ -7,6 +7,12 @@ import {
   MemoryStick,
   Zap,
 } from 'lucide-react'
+import {
+  ConfigurationPanel,
+  LaunchControls,
+  LaunchStatus,
+} from '@/components/Launcher'
+import type { LauncherController } from '@/hooks/useLauncher'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -192,9 +198,11 @@ const timing = (value?: Timing, rate = true) =>
 export function Monitor({
   monitor,
   layout,
+  launcher,
 }: {
   monitor: MonitorData
   layout: 'fit' | 'comfortable'
+  launcher: LauncherController
 }) {
   const { data: d, samples } = monitor
   const model = d?.model || {}
@@ -221,28 +229,25 @@ export function Monitor({
   const splitTotal = split.reduce((sum, item) => sum + item.bytes, 0)
   return (
     <TooltipProvider delayDuration={150}>
-      <div
-        className={`monitor-layout monitor-${layout} ${layout === 'comfortable' ? 'space-y-6' : ''}`}
-      >
-        <div className="monitor-summary grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
+      <div className={`monitor-layout monitor-${layout}`}>
+        <div className="monitor-controls">
           <div className="surface subtle-grid monitor-feature monitor-hero relative overflow-hidden rounded-2xl p-6 sm:p-8">
             <div className="absolute -right-20 -top-28 size-64 rounded-full bg-primary/10 blur-3xl" />
             <div className="relative">
-              <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-primary">
-                <Activity className="size-4" /> Live session
-              </p>
+              <div className="monitor-session-heading flex flex-wrap items-center justify-between gap-2">
+                <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-primary">
+                  <Activity className="size-4" /> Live session
+                </p>
+                <LaunchStatus launcher={launcher} />
+              </div>
               <h2
                 id="s-model"
                 className="break-all text-3xl font-semibold tracking-tight sm:text-4xl"
               >
                 {model.name || 'Waiting for a model'}
               </h2>
-              <p className="mt-3 text-sm text-muted-foreground">
-                {d?.online
-                  ? 'Current model and inference activity'
-                  : 'Connect to llama-server to see live telemetry.'}
-              </p>
-              <div className="mt-7 flex flex-wrap gap-3">
+
+              <div className="model-meta mt-4 flex flex-wrap gap-2">
                 <Badge variant="secondary" className="px-3 py-1.5">
                   Context{' '}
                   <span id="s-ctx" className="ml-1 text-foreground">
@@ -260,8 +265,12 @@ export function Monitor({
                   </span>
                 </Badge>
               </div>
+              <LaunchControls launcher={launcher} />
             </div>
           </div>
+          <ConfigurationPanel launcher={launcher} />
+        </div>
+        <div className="monitor-telemetry">
           <div className="surface monitor-feature monitor-decode rounded-2xl p-6 sm:p-8">
             <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.2em] text-primary">
               <Zap className="size-4" /> Decode speed
@@ -285,8 +294,7 @@ export function Monitor({
               3-sample smoothed · last ~60s
             </p>
           </div>
-        </div>
-        <div className="monitor-panels grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+
           <Panel
             title="Session"
             icon={CircuitBoard}
@@ -461,9 +469,17 @@ export function Monitor({
             </div>
           </Panel>
           <Panel
-            title="System memory"
+            title={
+              d?.runtime?.containerized
+                ? 'Docker system memory'
+                : 'System memory'
+            }
             icon={MemoryStick}
-            info="Whole-machine RAM and the llama-server process resident memory."
+            info={
+              d?.runtime?.containerized
+                ? 'RAM visible inside Docker (the Linux VM on Docker Desktop) and the llama-server process resident memory; this is not Windows host RAM.'
+                : 'Whole-machine RAM and the llama-server process resident memory.'
+            }
             className="monitor-memory"
           >
             <div id="sysmem">
