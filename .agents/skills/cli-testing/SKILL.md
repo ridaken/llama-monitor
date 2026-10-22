@@ -50,6 +50,8 @@ On a task-owned backend:
    `stats --json`, `logs --tail 100 --json`, and `history list --limit 10 --json`
    assertions. History ingestion is asynchronous; use bounded polling for the
    expected new run, not a fixed sleep or an unrelated existing row.
+   When testing history, check the new run with the model filter before calling
+   `stats`, including after restart, so UI polling cannot mask collection issues.
 5. Exercise `restart --wait --json` if relevant, then `stop --json` and verify
    the stopped state. Shut down only the test's backend/Compose project.
 

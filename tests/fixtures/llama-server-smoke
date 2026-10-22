@@ -33,7 +33,8 @@ class Handler(BaseHTTPRequestHandler):
         with log.open("a") as output:
             output.write("slot launch_slot: id 0 | processing task 1\n"
                          "slot print_timing: id 0 | task 1 | prompt eval time = 100.00 ms / 12 tokens\n"
-                         "slot print_timing: id 0 | task 1 | eval time = 200.00 ms / 7 tokens\n")
+                         "slot print_timing: id 0 | task 1 | eval time = 200.00 ms / 7 tokens\n"
+                         "slot print_timing: id 0 | task 1 | total time = 300.00 ms / 19 tokens\n")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()

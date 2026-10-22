@@ -1,5 +1,7 @@
 import argparse
 import os
+import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -67,3 +69,49 @@ def test_main_rejects_default_directory_before_locking(isolated, monkeypatch):
     with pytest.raises(SystemExit) as error:
         app_module.main()
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize("flags,name", [
+    ([], "weights.gguf"),
+    ([{"flag": "--alias", "value": "Server alias"}], "Server alias"),
+    ([{"flag": "-a", "value": "Short alias"}], "Short alias"),
+    ([{"flag": "--alias", "value": "Disabled", "enabled": False}], "weights.gguf"),
+    ([{"flag": "--alias", "value": "First"}, {"flag": "-a", "value": "Last"}], "Last"),
+    ([{"flag": "--alias=Inline"}], "Inline"),
+])
+def test_launch_and_restart_history_have_model_without_stats(isolated, monkeypatch, flags, name):
+    followers = []
+    make_follower = app_module.LogFollower
+
+    def capture_follower(*args, **kwargs):
+        follower = make_follower(*args, **kwargs)
+        followers.append(follower)
+        return follower
+
+    monkeypatch.setattr(app_module, "LogFollower", capture_follower)
+    monkeypatch.setattr(make_follower, "start", lambda _: None)
+    launches = []
+
+    def fake_launch(manager, config):
+        run_id = f"run-{len(launches)}"
+        launches.append(run_id)
+        manager.current = config
+        Path(store.MANAGED_LOG).write_text("", encoding="utf-8")
+        store.set_running({"pid": 123, "run_id": run_id, "config": config, "started_at": time.time()})
+        manager._retarget("http://127.0.0.1:9", store.MANAGED_LOG, 9)
+        Path(store.MANAGED_LOG).write_text(
+            "slot launch_slot: id 0 | processing task 1\n"
+            "slot print_timing: id 0 | task 1 | prompt eval time = 100 ms / 12 tokens\n"
+            "slot print_timing: id 0 | task 1 | eval time = 200 ms / 7 tokens\n"
+            "slot print_timing: id 0 | task 1 | total time = 300 ms / 19 tokens\n", encoding="utf-8")
+        return manager.status()
+
+    monkeypatch.setattr(app_module.ServerManager, "launch", fake_launch)
+    config = {"name": "Saved profile", "model_path": "/models/weights.gguf", "port": 9001, "flags": flags}
+    with TestClient(app_module.build_app(isolated)) as client:
+        for action in ("launch", "restart"):
+            assert client.post(f"/api/launcher/{action}", json=config).status_code == 200
+            followers[0].poll()
+            page = client.get("/api/history", params={"model": name}).json()
+            assert any(row["run_id"] == launches[-1] and row["state"] == "complete" for row in page["items"]), page
+        assert len(launches) == 2

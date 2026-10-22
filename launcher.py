@@ -86,6 +86,18 @@ def _flag_tokens(flags: list[dict]) -> list[str]:
     return out
 
 
+def configured_model_name(config: dict) -> str:
+    """Seed history identity from the actual launch arguments, before any UI poll."""
+    name = os.path.basename(config.get("model_path") or "")
+    tokens = _flag_tokens(config.get("flags") or [])
+    for index, token in enumerate(tokens):
+        if token in ("-a", "--alias") and index + 1 < len(tokens):
+            name = tokens[index + 1]
+        elif token.startswith(("--alias=", "-a=")):
+            name = token.partition("=")[2]
+    return name
+
+
 def resolve_binary(path: Optional[str]) -> Optional[str]:
     """Return an executable path for the configured binary, or None if invalid.
 

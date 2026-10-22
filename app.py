@@ -40,7 +40,7 @@ from collectors import (
     find_llama_pids,
 )
 from history import HistoryDB, LogFollower, decode_log_line
-from launcher import LaunchError, ServerManager, resolve_binary
+from launcher import LaunchError, ServerManager, configured_model_name, resolve_binary
 from gaming import GamingCoordinator
 from apollo import ApolloClient, certificate_fingerprint, parse_url, protect, unprotect
 from apollo_setup import commands as hook_commands, write_hook_config
@@ -124,6 +124,7 @@ def build_app(args) -> FastAPI:
         follower.attach(log_path, run_id=(record or {}).get("run_id"), managed=True,
                         started_at=(record or {}).get("started_at"),
                         prompt_dir=managed_prompt_dir((record or {}).get("config") or {}))
+        follower.set_model(configured_model_name((record or {}).get("config") or {}))
         rt["log_path"] = log_path
         rt["port"] = port
         state["active"] = False

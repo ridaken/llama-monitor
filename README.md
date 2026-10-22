@@ -175,6 +175,8 @@ Additional commands are `configs show NAME`, `restart [--wait]`, `wait --backend
 pass the returned `next_cursor` to fetch another page. `logs` returns a snapshot
 of complete lines from the API's bounded initial log window, rather than following
 the log indefinitely. See `python cli.py --help` and each command's `--help`.
+Managed history uses the launch alias (or model filename) immediately, so filtering
+by model works after launch/restart even when no dashboard or stats request runs.
 
 With a native backend, run `python cli.py ...` from the checkout. Set `--url` or
 `LLAMA_MONITOR_URL` to its URL (default `http://127.0.0.1:8500`). `--url` takes

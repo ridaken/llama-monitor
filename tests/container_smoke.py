@@ -121,6 +121,11 @@ def main():
                        input=json.dumps(config))["readiness"]["ready"]
             assert cli("restart", "--wait", "--timeout", "30")["readiness"]["ready"]
             eventually(lambda: request("/health", inference=True)["status"] == "ok")
+            restarted = cli("status")["readiness"]["run_id"]
+            cli("smoke", "--timeout", "10")
+            # No stats/UI request: the new run must already be filterable by model.
+            eventually(lambda: any(row["run_id"] == restarted and row["state"] == "complete"
+                                   for row in cli("history", "list", "--model", "smoke.gguf")["items"]))
             exec_python("from pathlib import Path; Path('/data/smoke-stopped').unlink()")
             run("stop")
             assert run("ps", "--all", "--format", "json", capture=True)
