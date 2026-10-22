@@ -31,9 +31,11 @@ import json
 import os
 import shutil
 import threading
+import runtime
 from typing import Optional
 
-HOME_DIR = os.path.join(os.path.expanduser("~"), ".llama-monitor")
+HOME_DIR = os.path.abspath(os.path.expanduser(os.environ.get(
+    "LLAMA_MONITOR_DATA_DIR", os.path.join(os.path.expanduser("~"), ".llama-monitor"))))
 STATE_PATH = os.path.join(HOME_DIR, "state.json")
 # The log file llama-monitor tells launched servers to write (and then tails).
 MANAGED_LOG = os.path.join(HOME_DIR, "llama-server.log")
@@ -55,7 +57,7 @@ def _default_state() -> dict:
             # Seed from PATH on first run; may be None if llama-server isn't installed
             # globally, in which case the UI shows a "set the path" warning.
             "llama_server_path": shutil.which("llama-server"),
-            "models_dir": None,
+            "models_dir": "/models" if runtime.containerized() else None,
             "default_port": DEFAULT_PORT,
             # Name of the config to auto-load on page open when no server is
             # running (the user's "default / favourite"). None when unset.

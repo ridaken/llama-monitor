@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import threading
 import time
 
@@ -9,6 +10,7 @@ import httpx
 import psutil
 
 import store
+import runtime
 from apollo import ApolloClient
 from launcher import LaunchError, resolve_binary
 from processes import AuxiliaryServer, identity_matches
@@ -56,7 +58,8 @@ class GamingCoordinator:
             servers = transition.get("servers", [])
             phase = transition.get("phase", "normal")
             deadline = transition.get("deadline")
-            return {"enabled": settings["enabled"], "phase": phase,
+            return {"supported": os.name == "nt" and not runtime.containerized(),
+                    "enabled": settings["enabled"], "phase": phase,
                     "reason": transition.get("reason"),
                     "blocked": phase != "normal", "connected_clients": None if self.connected is None else len(self.connected),
                     "countdown": max(0, int(deadline - self.clock() + .999)) if deadline else None,

@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 import psutil
 
 import store
+import runtime
 
 
 ROOT = Path(__file__).resolve().parent
@@ -132,7 +133,7 @@ class WindowsStartup:
     def state(self):
         self.consume_result()
         settings = store.load_state()["startup"]
-        return {"supported": os.name == "nt", "installed": settings["installed"],
+        return {"supported": os.name == "nt" and not runtime.containerized(), "installed": settings["installed"],
                 "mode": settings["mode"], "autostart_models": settings["autostart_models"],
                 "models": [{"id": s["id"], "name": s["name"], "port": s["port"]} for s in settings["models"]],
                 "pending": settings["pending"] is not None, "last_error": settings["last_error"],

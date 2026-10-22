@@ -69,6 +69,19 @@ export function Gaming() {
     }
   }
   const blocked = !!state?.blocked || pending
+  if (state?.supported === false) {
+    return (
+      <Card className="surface rounded-2xl" id="gaming-panel">
+        <CardHeader>
+          <CardTitle>Moonlight gaming integration</CardTitle>
+          <CardDescription>
+            Apollo gaming integration requires the native Windows installation.
+            It is unavailable in Docker.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
   return (
     <Card className="surface rounded-2xl" id="gaming-panel">
       <CardHeader>
