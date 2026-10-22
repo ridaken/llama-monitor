@@ -26,3 +26,5 @@ playwright-report/
 # Editor / OS
 .DS_Store
 *.swp
+.env
+models/

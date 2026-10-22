@@ -1,0 +1,28 @@
+services:
+  monitor:
+    build:
+      context: .
+      args:
+        LLAMA_CPP_IMAGE: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${DASHBOARD_PORT:-8500}:8500"
+      - "${BIND_ADDRESS:-0.0.0.0}:${INFERENCE_PORT:-8001}:8001"
+    volumes:
+      - monitor-data:/data
+      - type: bind
+        source: ${MODELS_DIR:-./models}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  monitor-data:

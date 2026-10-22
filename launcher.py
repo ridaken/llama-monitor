@@ -22,6 +22,7 @@ import uuid
 from typing import Callable, Optional
 
 import store
+import runtime
 import flags as flags_mod
 from processes import capture_process, identity_matches, same_path, terminate_verified
 
@@ -209,6 +210,8 @@ class ServerManager:
         argv += _flag_tokens(config.get("flags") or [])
         # Managed flags, always at known values, appended last so they win.
         argv += ["--port", str(int(port))]
+        if runtime.containerized():
+            argv += ["--host", "0.0.0.0"]
         argv += ["--metrics"]
         advertised = flags_mod.get_server_flags(binary)
         supported = {alias for entry in advertised["flags"] for alias in entry.get("flags", [])} \
@@ -247,6 +250,8 @@ class ServerManager:
             raise LaunchError("Port must be a number.")
         if not (1 <= port <= 65535):
             raise LaunchError("Port must be between 1 and 65535.")
+        if runtime.containerized() and port != 8001:
+            raise LaunchError("Docker uses internal port 8001. Change INFERENCE_PORT in .env to publish another host port.")
         config = {**config, "port": port}
 
         argv = list(_snapshot["argv"]) if _snapshot else self.build_argv(config, binary)

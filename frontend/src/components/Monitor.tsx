@@ -469,9 +469,17 @@ export function Monitor({
             </div>
           </Panel>
           <Panel
-            title="System memory"
+            title={
+              d?.runtime?.containerized
+                ? 'Docker system memory'
+                : 'System memory'
+            }
             icon={MemoryStick}
-            info="Whole-machine RAM and the llama-server process resident memory."
+            info={
+              d?.runtime?.containerized
+                ? 'RAM visible inside Docker (the Linux VM on Docker Desktop) and the llama-server process resident memory; this is not Windows host RAM.'
+                : 'Whole-machine RAM and the llama-server process resident memory.'
+            }
             className="monitor-memory"
           >
             <div id="sysmem">
