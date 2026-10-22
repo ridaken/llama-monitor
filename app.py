@@ -40,7 +40,7 @@ from collectors import (
     find_llama_pids,
 )
 from history import HistoryDB, LogFollower, decode_log_line
-from launcher import LaunchError, ServerManager, resolve_binary
+from launcher import LaunchError, ServerManager, configured_model_name, resolve_binary
 from gaming import GamingCoordinator
 from apollo import ApolloClient, certificate_fingerprint, parse_url, protect, unprotect
 from apollo_setup import commands as hook_commands, write_hook_config
@@ -48,6 +48,7 @@ from processes import discover_registered
 from instance import backend_lock
 from windows_startup import WindowsStartup
 from background import log_config as background_log_config
+from verification import ManagedVerification, SmokeRequest, VerificationError, VerificationTimeout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(HERE, "static")
@@ -82,7 +83,16 @@ def _delta_split(baseline: dict, gpu_data: dict) -> list:
     return split
 
 
+def validate_test_directory():
+    default_data = os.path.join(os.path.expanduser("~"), ".llama-monitor")
+    if os.path.normcase(os.path.realpath(store.HOME_DIR)) == os.path.normcase(os.path.realpath(default_data)):
+        raise ValueError("Test mode requires a separate LLAMA_MONITOR_DATA_DIR.")
+
+
 def build_app(args) -> FastAPI:
+    test_mode = getattr(args, "test_mode", False)
+    if test_mode:
+        validate_test_directory()
     gpu = GpuCollector()
 
     # The monitored target lives in a mutable holder so launching a server can
@@ -114,6 +124,7 @@ def build_app(args) -> FastAPI:
         follower.attach(log_path, run_id=(record or {}).get("run_id"), managed=True,
                         started_at=(record or {}).get("started_at"),
                         prompt_dir=managed_prompt_dir((record or {}).get("config") or {}))
+        follower.set_model(configured_model_name((record or {}).get("config") or {}))
         rt["log_path"] = log_path
         rt["port"] = port
         state["active"] = False
@@ -134,7 +145,7 @@ def build_app(args) -> FastAPI:
     # skip adoption entirely and watch exactly what was asked for. A bare
     # `python app.py` (default URL) still auto-reconnects.
     cli_target_explicit = (args.llama_url or "") != DEFAULT_LLAMA_URL
-    if runtime.containerized():
+    if runtime.containerized() or test_mode:
         # Container PID namespaces are recreated; a new container never adopts
         # a persisted numeric PID or automatically loads a saved model.
         store.set_running(None)
@@ -146,13 +157,17 @@ def build_app(args) -> FastAPI:
                      adopted.get("log_path") or store.MANAGED_LOG, a_port)
 
     gaming = GamingCoordinator(manager)
-    windows_startup = WindowsStartup(gaming, getattr(args, "port", 8500))
-    gaming.startup_results = windows_startup.consume_result
+    if test_mode:
+        gaming.transition = None
+    windows_startup = WindowsStartup(gaming, getattr(args, "port", 8500), test_mode=test_mode)
+    if not test_mode:
+        gaming.startup_results = windows_startup.consume_result
+    verification = ManagedVerification(manager, gaming)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         follower.start()
-        if not runtime.containerized():
+        if not runtime.containerized() and not test_mode:
             gaming.start()
         # Native launches outlive the backend; container launches stop with it.
         try:
@@ -160,7 +175,7 @@ def build_app(args) -> FastAPI:
         finally:
             gaming.close()
             try:
-                if runtime.containerized():
+                if runtime.containerized() or test_mode:
                     manager.stop()
             finally:
                 follower.stop()
@@ -173,7 +188,22 @@ def build_app(args) -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    @app.get("/api/launcher/readiness")
+    def readiness():
+        return verification.readiness()
+
+    @app.post("/api/launcher/smoke")
+    async def smoke(body: SmokeRequest):
+        try:
+            return await verification.smoke(body.timeout)
+        except VerificationTimeout as exc:
+            return JSONResponse({"error": str(exc)}, status_code=504)
+        except (VerificationError, RuntimeError, OSError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+
     def local_request(request):
+        if test_mode:
+            raise LaunchError("Integration changes are disabled in test mode.")
         if runtime.containerized():
             raise LaunchError("This integration requires the native Windows installation; it is unavailable in Docker.")
         try:
@@ -478,6 +508,8 @@ def build_app(args) -> FastAPI:
     def launcher_state() -> dict:
         settings = store.get_settings()
         status = manager.status()
+        record = store.get_running() or {}
+        status["run_id"] = record.get("run_id") if record.get("pid") == status.get("pid") else None
         pending_config = gaming.primary_config()
         if pending_config:
             status = {**status, "config": pending_config, "config_name": pending_config.get("name")}
@@ -489,6 +521,7 @@ def build_app(args) -> FastAPI:
             "managed_log": store.MANAGED_LOG,
             "gaming": gaming.state(),
             "runtime": runtime.info(),
+            "test_mode": test_mode,
         }
 
     @app.get("/api/launcher/state")
@@ -669,18 +702,18 @@ def main() -> None:
     p = argparse.ArgumentParser(description="llama-server live monitor")
     p.add_argument(
         "--llama-url",
-        default=os.environ.get("LLAMA_URL", DEFAULT_LLAMA_URL),
+        default=None,
         help=f"Base URL of a running llama-server to watch (default: {DEFAULT_LLAMA_URL}). "
              "A non-default value takes precedence over re-adopting a launched server.",
     )
     p.add_argument(
         "--llama-log",
-        default=os.environ.get("LLAMA_LOG"),
+        default=None,
         help="Path to a running llama-server's startup log (for the CPU split number)",
     )
     p.add_argument(
         "--llama-prompts-dir",
-        default=os.environ.get("LLAMA_PROMPTS_DIR"),
+        default=None,
         help="Directory written by an external server's --log-prompts-dir flag",
     )
     p.add_argument(
@@ -691,7 +724,18 @@ def main() -> None:
     )
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--background", action="store_true", help="Run without a console and log to ~/.llama-monitor/backend.log")
+    p.add_argument("--test-mode", action="store_true", help="Use isolated data, disable integration automation, and stop test models on exit")
     args = p.parse_args()
+    if args.test_mode:
+        try:
+            validate_test_directory()
+        except ValueError as exc:
+            p.error(str(exc))
+        args.llama_url = args.llama_url or "http://127.0.0.1:9"
+    else:
+        args.llama_url = args.llama_url or os.environ.get("LLAMA_URL", DEFAULT_LLAMA_URL)
+        args.llama_log = args.llama_log or os.environ.get("LLAMA_LOG")
+        args.llama_prompts_dir = args.llama_prompts_dir or os.environ.get("LLAMA_PROMPTS_DIR")
 
     logging_config = background_log_config(store.HOME_DIR) if args.background else None
     if logging_config:

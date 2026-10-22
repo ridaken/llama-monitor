@@ -22,7 +22,7 @@ def main():
     store.PROMPTS_DIR = os.path.join(state_dir, "prompts")
     args = argparse.Namespace(
         llama_url="http://127.0.0.1:9", llama_log=None,
-        llama_prompts_dir=None, port=port, host="127.0.0.1",
+        llama_prompts_dir=None, port=port, host="127.0.0.1", test_mode=True,
     )
     uvicorn.run(app_module.build_app(args), host="127.0.0.1", port=port, log_level="error")
 

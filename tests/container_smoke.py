@@ -67,10 +67,26 @@ def main():
         def exec_python(source):
             return run("exec", "-T", "monitor", "python", "-c", source, capture=True).strip()
 
+        def cli(*arguments, expected=0, input=None):
+            result = subprocess.run([*compose, "exec", "-T", "monitor", "python", "cli.py", *arguments, "--json"],
+                                    cwd=ROOT, env=env, input=input, capture_output=True, text=True)
+            assert result.returncode == expected, (arguments, result.returncode, result.stdout, result.stderr)
+            assert not result.stderr, result.stderr
+            body = json.loads(result.stdout)
+            assert body["ok"] == (expected == 0), body
+            return body.get("data") if expected == 0 else body["error"]
+
         try:
             run("config", "--quiet")
             run("up", "--build", "--wait", "--wait-timeout", "120", "-d")
             assert request("/api/health") == {"status": "ok"}
+            cli("wait", "--backend", "--timeout", "10")
+            assert cli("status")["readiness"]["state"] == "stopped"
+            cli("wait", "--ready", expected=1)
+            cli("smoke", expected=1)
+            cli("launch", expected=2)
+            cli("stats", "--url", "http://127.0.0.1:9", expected=3)
+            cli("wait", "--backend", "--timeout", "0.1", "--url", "http://127.0.0.1:9", expected=4)
             assert exec_python("import os; print(os.getuid())") == "10001"
             state = request("/api/launcher/state")
             assert state["binary_valid"] and state["status"]["state"] == "stopped"
@@ -89,27 +105,40 @@ def main():
             request("/api/launcher/settings", {"llama_server_path": "/tmp/llama-server-smoke"})
             config = {"name": "smoke", "model_path": "/models/smoke.gguf", "port": 8001, "flags": []}
             request("/api/configs", config)
-            assert request("/api/launcher/launch", config)["status"]["state"] == "running"
+            assert cli("configs", "list")["configs"][0] == config
+            assert cli("configs", "show", "smoke") == config
+            assert cli("launch", "--config", "smoke", "--wait", "--timeout", "30")["readiness"]["ready"]
             eventually(lambda: request("/health", inference=True)["status"] == "ok")
-            assert request("/v1/chat/completions", {"messages": []}, inference=True)["choices"]
-            eventually(lambda: request("/api/history")["items"])
-            assert request("/api/launcher/stop", {})["status"]["state"] == "stopped"
+            assert cli("smoke", "--timeout", "10")["message"]["content"] == "smoke response"
+            assert cli("stats")["runtime"]["containerized"]
+            assert cli("logs", "--tail", "2")["available"]
+            assert cli("gaming", "status")["supported"] is False
+            assert cli("startup", "status")["supported"] is False
+            eventually(lambda: cli("history", "list")["items"])
+            assert cli("stop")["status"]["state"] == "stopped"
             assert exec_python("from pathlib import Path; print(Path('/data/smoke-stopped').read_text())") == "graceful"
-            assert request("/api/launcher/restart", {})["status"]["state"] == "running"
+            assert cli("launch", "--config-file", "-", "--wait", "--timeout", "30",
+                       input=json.dumps(config))["readiness"]["ready"]
+            assert cli("restart", "--wait", "--timeout", "30")["readiness"]["ready"]
             eventually(lambda: request("/health", inference=True)["status"] == "ok")
+            restarted = cli("status")["readiness"]["run_id"]
+            cli("smoke", "--timeout", "10")
+            # No stats/UI request: the new run must already be filterable by model.
+            eventually(lambda: any(row["run_id"] == restarted and row["state"] == "complete"
+                                   for row in cli("history", "list", "--model", "smoke.gguf")["items"]))
             exec_python("from pathlib import Path; Path('/data/smoke-stopped').unlink()")
             run("stop")
             assert run("ps", "--all", "--format", "json", capture=True)
             run("up", "--wait", "--wait-timeout", "60", "-d")
             assert exec_python("from pathlib import Path; print(Path('/data/smoke-stopped').read_text())") == "graceful"
-            assert request("/api/launcher/state")["status"]["state"] == "stopped"
+            assert cli("status")["launcher"]["status"]["state"] == "stopped"
             request("/api/launcher/settings", {"llama_server_path": bundled})
             run("up", "--force-recreate", "--wait", "--wait-timeout", "60", "-d")
             assert request("/api/launcher/state")["binary_valid"]
-            assert request("/api/configs")["configs"][0]["name"] == "smoke"
-            assert request("/api/history")["items"]
-            assert request("/api/launcher/state")["status"]["state"] == "stopped"
-            print("Container smoke passed: assets, binary, browsing, launch/stop/restart, inference, history, persistence, graceful shutdown.")
+            assert cli("configs", "list")["configs"][0]["name"] == "smoke"
+            assert cli("history", "list")["items"]
+            assert cli("status")["launcher"]["status"]["state"] == "stopped"
+            print("Container smoke passed: bundled CLI, exit codes, readiness, inference, telemetry, logs, history, lifecycle, persistence, graceful shutdown.")
         finally:
             run("logs", "--tail", "40")
             run("down", "--volumes", "--remove-orphans")
