@@ -41,6 +41,8 @@ def main():
     parser.add_argument("--gpu", action="store_true")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="llama-monitor-smoke-") as directory:
+        # Linux tempfile directories default to 0700; the container uses UID 10001.
+        Path(directory).chmod(0o755)
         Path(directory, "smoke.gguf").touch()
         env = {**os.environ, "MODELS_DIR": Path(directory).as_posix(),
                "BIND_ADDRESS": "127.0.0.1", "DASHBOARD_PORT": str(free_port()),
