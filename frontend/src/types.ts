@@ -1,5 +1,6 @@
 export type Flag = { flag: string; value: string; enabled?: boolean }
 export type GamingState = {
+  supported?: boolean
   enabled: boolean
   reason?: 'startup' | 'gaming' | null
   phase:
@@ -48,6 +49,7 @@ export type Config = {
   flags: Flag[]
 }
 export type LauncherState = {
+  runtime?: RuntimeInfo
   settings: {
     llama_server_path: string | null
     models_dir: string | null
@@ -73,6 +75,7 @@ export type KnownFlag = {
 }
 export type FlagResponse = { source: string; flags: KnownFlag[] }
 export type Stats = {
+  runtime?: RuntimeInfo
   online: boolean
   gaming?: GamingState
   active?: boolean
@@ -134,6 +137,11 @@ export type Stats = {
   }
 }
 export type Timing = { tokens: number; secs: number; tps?: number | null }
+export type RuntimeInfo = {
+  containerized: boolean
+  models_dir: string | null
+  managed_port: number | null
+}
 export type Activity = {
   id: string
   run_id: string

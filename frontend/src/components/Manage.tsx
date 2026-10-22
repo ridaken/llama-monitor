@@ -15,6 +15,13 @@ export function Manage({ launcher }: { launcher: LauncherController }) {
           <CardTitle className="text-sm">llama-server binary</CardTitle>
         </CardHeader>
         <CardContent className="manage-panel-content">
+          {state?.runtime?.containerized && (
+            <p className="mb-3 text-sm text-muted-foreground">
+              Docker includes llama-server. Browse models under /models; host
+              paths and Windows executables are unavailable inside the
+              container.
+            </p>
+          )}
           <p
             id="lx-bin-path"
             className="mono mb-4 break-all text-xs text-muted-foreground"

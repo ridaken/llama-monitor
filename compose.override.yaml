@@ -1,0 +1,15 @@
+# Automatically included by `docker compose up`; omit this file for CPU-only use.
+services:
+  monitor:
+    build:
+      args:
+        LLAMA_CPP_IMAGE: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -282,6 +282,7 @@ export function ConfigurationPanel({
             <Label htmlFor="lx-port">Port</Label>
             <Input
               id="lx-port"
+              readOnly={!!state?.runtime?.containerized}
               type="number"
               min={1}
               max={65535}
@@ -296,7 +297,9 @@ export function ConfigurationPanel({
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Port, metrics, and log file are set automatically.
+          {state?.runtime?.containerized
+            ? 'Docker uses internal port 8001. Change INFERENCE_PORT in .env for a different host port. Models are mounted at /models.'
+            : 'Port, metrics, and log file are set automatically.'}
         </p>
         <div
           className={`configuration-prompts rounded-xl border bg-background/20 p-3 ${changed.prompts ? 'border-amber-500' : 'border-border/70'}`}

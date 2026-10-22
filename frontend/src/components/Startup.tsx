@@ -92,7 +92,10 @@ export function Startup() {
         </p>
         {state && !state.supported && (
           <p className="text-sm text-muted-foreground">
-            Automatic task installation is available on Windows.
+            Automatic task installation requires the native Windows
+            installation. For Docker, use the Compose restart policy and start
+            Docker with your operating system. Models are launched manually
+            after container restarts.
           </p>
         )}
         <div className="max-w-sm space-y-2">

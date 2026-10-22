@@ -69,6 +69,19 @@ export function Gaming() {
     }
   }
   const blocked = !!state?.blocked || pending
+  if (state?.supported === false) {
+    return (
+      <Card className="surface rounded-2xl" id="gaming-panel">
+        <CardHeader className="manage-panel-header">
+          <CardTitle>Moonlight gaming integration</CardTitle>
+          <CardDescription>
+            Apollo gaming integration requires the native Windows installation.
+            It is unavailable in Docker.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    )
+  }
   return (
     <Card className="surface rounded-2xl" id="gaming-panel">
       <CardHeader className="manage-panel-header">
@@ -79,11 +92,24 @@ export function Gaming() {
         </CardDescription>
       </CardHeader>
       <CardContent className="manage-panel-content space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Requires the{' '}
+          <a
+            href="https://github.com/ridaken/Apollo"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            Apollo build with independent authentication sessions
+          </a>
+          . Your Apollo browser login stays separate from background monitoring.
+          Incompatible builds are detected before any login is attempted.
+        </p>
         <p id="gaming-status" role="status" className="text-sm">
           {gamingLabel(state || undefined) ||
-            (state?.enabled ? 'Enabled · AI available' : 'Disabled')}
+            (state?.enabled ? 'Enabled Â· AI available' : 'Disabled')}
           {state?.enabled && state.connected_clients != null
-            ? ` · ${state.connected_clients} connected client(s)`
+            ? ` Â· ${state.connected_clients} connected client(s)`
             : ''}
         </p>
         {state?.integration_error && (
@@ -122,7 +148,7 @@ export function Gaming() {
               disabled={blocked}
               placeholder={
                 state?.credentials_saved
-                  ? 'Saved securely · leave blank to keep'
+                  ? 'Saved securely Â· leave blank to keep'
                   : 'Required for connection tracking'
               }
             />
@@ -204,7 +230,8 @@ export function Gaming() {
                 className="flex flex-wrap items-center gap-2 text-sm"
               >
                 <span>
-                  {server.name} · {server.status} · attempt {server.attempts}/2
+                  {server.name} Â· {server.status} Â· attempt {server.attempts}
+                  /2
                 </span>
                 {server.error && (
                   <span className="text-amber-300">{server.error}</span>
