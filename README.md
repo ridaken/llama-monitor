@@ -146,6 +146,106 @@ Apollo gaming integration and Windows Task Scheduler setup require the **native
 Windows installation** described below. Their controls explain this limitation
 when running in Docker. The Docker dashboard cannot manage Windows host processes.
 
+## Command-line verification
+
+The CLI is included in the Docker image. It connects to the running backend and
+uses the same controls as the dashboard; no host Python installation is needed:
+
+```sh
+docker compose exec -T monitor python cli.py status --json
+docker compose exec -T monitor python cli.py configs list --json
+docker compose exec -T monitor python cli.py launch --config "My model" --wait --timeout 300 --json
+docker compose exec -T monitor python cli.py smoke --timeout 60 --json
+docker compose exec -T monitor python cli.py stats --json
+docker compose exec -T monitor python cli.py logs --tail 100 --json
+docker compose exec -T monitor python cli.py history list --limit 10 --json
+docker compose exec -T monitor python cli.py stop --json
+```
+
+For CPU-only installations, use `docker compose -f compose.yaml exec -T ...`.
+Rebuild the image after source changes so the CLI and backend exercise that code.
+Model paths in configurations must be backend paths, such as `/models/model.gguf`
+in Docker. `launch --config-file PATH` reads an unsaved JSON configuration in the
+existing configuration format; `--config-file -` reads JSON from stdin. The JSON
+file is read where the CLI runs, so use stdin to pass a host file into Docker.
+
+Additional commands are `configs show NAME`, `restart [--wait]`, `wait --backend`,
+`wait --ready`, `gaming status`, and `startup status`. History supports `--model`,
+`--state`, `--from-ts`, `--to-ts`, `--sort`, `--order`, `--limit`, and `--cursor`;
+pass the returned `next_cursor` to fetch another page. `logs` returns a snapshot
+of complete lines from the API's bounded initial log window, rather than following
+the log indefinitely. See `python cli.py --help` and each command's `--help`.
+
+With a native backend, run `python cli.py ...` from the checkout. Set `--url` or
+`LLAMA_MONITOR_URL` to its URL (default `http://127.0.0.1:8500`). `--url` takes
+precedence; inherited HTTP proxy settings are ignored for these direct requests.
+Inside Docker the default URL reaches the backend regardless of published host
+port settings. The CLI does not start the backend or install Windows integrations.
+
+`status` succeeds when the backend answers, even when no model is running.
+`wait --backend` checks backend availability only. `launch` and `restart` confirm
+process startup; add `--wait` or use `wait --ready` to verify the managed process
+owns its inference port and its model health check succeeds. A replaced process,
+early exit, or pending gaming transition fails verification. `smoke` explicitly
+sends a short, nonstreaming request with a 16-token output limit and accepts
+generated answer or reasoning text; it reports completion details, elapsed time,
+and token usage when provided. It consumes inference resources and can add a
+history record. It currently verifies the managed primary chat model, not an
+external watch target or an embedding-only server.
+
+Commands never prompt. JSON mode writes exactly one object to stdout:
+`{"ok": true, "data": ...}` or
+`{"ok": false, "error": {"message": "...", "code": 1}}`.
+Exit codes are **0** success, **1** operation/verification failure, **2** invalid
+arguments or configuration input, **3** connection/protocol failure, **4** timeout,
+and **130** interruption. `--help` prints ordinary help text. Without `--json`,
+results are formatted JSON (plain console text for logs), and errors go to stderr.
+
+Requests default to 10 seconds (`--request-timeout`), waits to 300 seconds
+(`--timeout`), and smoke to 60 seconds (`--timeout`, maximum 300). Waits use a
+deadline and fail on a changed model run. Only backend-availability waits retry
+connection errors; no mutation or inference request is automatically retried.
+A timed-out submitted operation may still complete; inspect state before retrying.
+
+### Isolated development tests
+
+Run the existing automated tests, then the Compose smoke harness to rebuild and
+exercise the bundled CLI against a fake inference server. The harness uses a
+unique project, temporary model directory, dedicated data volume, and free host
+ports; it cleans up only its own resources and needs no real GGUF or GPU:
+
+```sh
+python -m pytest -q tests
+python tests/container_smoke.py
+# Optional NVIDIA image/integration check:
+python tests/container_smoke.py --gpu
+```
+
+For native testing, use a separate data directory and backend port. PowerShell:
+
+```powershell
+$env:LLAMA_MONITOR_DATA_DIR = "$PWD/test-results/cli-native"
+python app.py --test-mode --port 8765
+# In another terminal:
+python cli.py --url http://127.0.0.1:8765 wait --backend --json
+python cli.py --url http://127.0.0.1:8765 status --json
+```
+
+Test mode rejects the default native data directory, skips persisted process
+adoption, gaming recovery, and Windows startup actions, disables integration
+changes, and stops test-owned models on graceful backend shutdown. Inherited
+`LLAMA_URL`, `LLAMA_LOG`, and `LLAMA_PROMPTS_DIR` are ignored; explicit watch
+arguments still apply. Choose an unused model port in test configurations. For
+real-model verification, use an existing local model only when that test is in
+scope; it can compete with other processes for GPU memory. Tests with the fake
+server do not establish real GPU or model compatibility.
+
+The backend adds `GET /api/launcher/readiness` for fresh managed-model checks
+and `POST /api/launcher/smoke` with an optional `timeout` in seconds. Smoke
+returns HTTP 409 for verification failures, 504 for deadlines, and 422 for invalid
+input. Existing `/api/health` remains a backend-only probe. These endpoints use
+the same trusted-network access model as existing launcher controls.
+
 ## Launch & manage llama-server
 
 The **Monitor** view runs llama-server for

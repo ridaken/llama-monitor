@@ -95,14 +95,17 @@ def launch_setup(config_path):
 
 
 class WindowsStartup:
-    def __init__(self, coordinator, port):
+    def __init__(self, coordinator, port, *, test_mode=False):
         self.coordinator = coordinator
         self.port = port
+        self.test_mode = test_mode
 
     def result_path(self):
         return Path(store.HOME_DIR) / "windows-startup-result.json"
 
     def consume_result(self):
+        if self.test_mode:
+            return
         with self.coordinator.lock:
             settings = store.load_state()["startup"]
             pending = settings["pending"]
@@ -133,7 +136,7 @@ class WindowsStartup:
     def state(self):
         self.consume_result()
         settings = store.load_state()["startup"]
-        return {"supported": os.name == "nt" and not runtime.containerized(), "installed": settings["installed"],
+        return {"supported": os.name == "nt" and not runtime.containerized() and not self.test_mode, "installed": settings["installed"],
                 "mode": settings["mode"], "autostart_models": settings["autostart_models"],
                 "models": [{"id": s["id"], "name": s["name"], "port": s["port"]} for s in settings["models"]],
                 "pending": settings["pending"] is not None, "last_error": settings["last_error"],
