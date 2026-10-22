@@ -189,116 +189,116 @@ button:disabled {
   display: block;
   min-width: 0;
 }
-.monitor-fit {
+.app-fit .monitor-layout {
   flex: 1;
   gap: 10px;
 }
-.monitor-fit .monitor-controls,
-.monitor-fit .monitor-telemetry {
+.app-fit .monitor-controls,
+.app-fit .monitor-telemetry {
   gap: 10px;
 }
-.monitor-fit .monitor-feature {
+.app-fit .monitor-feature {
   min-width: 0;
   padding: 16px 18px;
 }
-.monitor-fit .monitor-hero h2 {
+.app-fit .monitor-hero h2 {
   margin-top: 10px;
 }
-.monitor-fit .model-meta {
+.app-fit .model-meta {
   margin-top: 12px;
 }
-.monitor-fit .model-meta > * {
+.app-fit .model-meta > * {
   padding: 3px 9px;
 }
-.monitor-fit .launch-controls {
+.app-fit .launch-controls {
   margin-top: 14px;
 }
-.monitor-fit .launch-controls button {
+.app-fit .launch-controls button {
   height: 32px;
   padding: 0 10px;
   font-size: 12px;
 }
-.monitor-fit .configuration-header {
+.app-fit .configuration-header {
   padding: 12px 18px 10px;
 }
-.monitor-fit .configuration-content {
+.app-fit .configuration-content {
   padding: 0 18px 12px;
   --configuration-gap: 8px;
 }
-.monitor-fit .configuration-content > :not(:last-child) {
+.app-fit .configuration-content > :not(:last-child) {
   margin-block-end: var(--configuration-gap);
 }
-.monitor-fit .configuration-content label {
+.app-fit .configuration-content label {
   font-size: 12px;
 }
-.monitor-fit .configuration-content input,
-.monitor-fit .configuration-content [role='combobox'],
-.monitor-fit .configuration-content button:not([role='checkbox']) {
+.app-fit .configuration-content input,
+.app-fit .configuration-content [role='combobox'],
+.app-fit .configuration-content button:not([role='checkbox']) {
   height: 32px;
   font-size: 12px;
 }
-.monitor-fit .configuration-content .space-y-2 > :not(:last-child) {
+.app-fit .configuration-content .space-y-2 > :not(:last-child) {
   margin-block-end: 4px;
 }
-.monitor-fit .configuration-prompts {
+.app-fit .configuration-prompts {
   padding: 8px;
 }
-.monitor-fit .configuration-prompts strong {
+.app-fit .configuration-prompts strong {
   font-size: 12px;
 }
-.monitor-fit .configuration-save {
+.app-fit .configuration-save {
   gap: 8px;
 }
-.monitor-fit .monitor-decode .metric {
+.app-fit .monitor-decode .metric {
   font-size: clamp(2rem, 2.6vw, 3.5rem);
   line-height: 1.1;
 }
-.monitor-fit .monitor-panel-header {
+.app-fit .monitor-panel-header {
   padding: 14px 16px 6px;
 }
-.monitor-fit .monitor-panel-content {
+.app-fit .monitor-panel-content {
   padding: 0 16px 14px;
 }
-.monitor-fit .monitor-row {
+.app-fit .monitor-row {
   gap: 10px;
   padding: 5px 0;
 }
-.monitor-fit .monitor-row > span {
+.app-fit .monitor-row > span {
   min-width: 0;
   font-size: 12.5px;
   line-height: 1.4;
 }
-.monitor-fit .monitor-row > span:last-child {
+.app-fit .monitor-row > span:last-child {
   overflow-wrap: anywhere;
 }
-.monitor-fit .monitor-spark {
+.app-fit .monitor-spark {
   height: clamp(28px, 3.4vh, 65px);
 }
-.monitor-fit .monitor-decode > p:first-child {
+.app-fit .monitor-decode > p:first-child {
   margin-bottom: 8px;
 }
-.monitor-fit #split-legend {
+.app-fit #split-legend {
   margin-top: 12px;
 }
-.monitor-fit #slots,
-.monitor-fit #gpus > div {
+.app-fit #slots,
+.app-fit #gpus > div {
   gap: 8px;
 }
-.monitor-fit .monitor-slot,
-.monitor-fit .monitor-gpu {
+.app-fit .monitor-slot,
+.app-fit .monitor-gpu {
   min-width: 0;
   padding: 10px;
 }
-.monitor-fit .monitor-slot > div:first-child,
-.monitor-fit .monitor-slot > p,
-.monitor-fit .monitor-gpu > div:first-child {
+.app-fit .monitor-slot > div:first-child,
+.app-fit .monitor-slot > p,
+.app-fit .monitor-gpu > div:first-child {
   margin-bottom: 8px;
 }
-.monitor-fit .monitor-gpu > .space-y-3 > :not(:last-child) {
+.app-fit .monitor-gpu > .space-y-3 > :not(:last-child) {
   margin-block-end: 6px;
 }
-.monitor-fit .monitor-gpu > .mt-4,
-.monitor-fit #gpu-total-w {
+.app-fit .monitor-gpu > .mt-4,
+.app-fit #gpu-total-w {
   margin-top: 10px;
 }
 @media (min-width: 1280px) {
@@ -306,16 +306,16 @@ button:disabled {
     grid-template-columns: clamp(360px, 30vw, 640px) minmax(0, 1fr);
     align-items: start;
   }
-  .monitor-fit {
+  .app-fit .monitor-layout {
     align-items: stretch;
   }
-  .monitor-fit .monitor-controls {
+  .app-fit .monitor-controls {
     align-self: start;
   }
   .monitor-telemetry {
     grid-template-columns: repeat(12, minmax(0, 1fr));
   }
-  .monitor-fit .monitor-telemetry {
+  .app-fit .monitor-telemetry {
     align-self: start;
     align-content: stretch;
     min-height: max(595px, calc(100dvh - 264px));
@@ -343,86 +343,86 @@ button:disabled {
     grid-row: 3;
     grid-column: span 8;
   }
-  .monitor-fit .monitor-panel,
-  .monitor-fit .monitor-decode,
-  .monitor-fit .monitor-gpu,
-  .monitor-fit .monitor-slot {
+  .app-fit .monitor-panel,
+  .app-fit .monitor-decode,
+  .app-fit .monitor-gpu,
+  .app-fit .monitor-slot {
     display: flex;
     flex-direction: column;
   }
-  .monitor-fit .monitor-panel-content {
+  .app-fit .monitor-panel-content {
     display: flex;
     min-height: 0;
     flex: 1;
     flex-direction: column;
   }
-  .monitor-fit .monitor-throughput .monitor-panel-content,
-  .monitor-fit .monitor-session .monitor-panel-content {
+  .app-fit .monitor-throughput .monitor-panel-content,
+  .app-fit .monitor-session .monitor-panel-content {
     justify-content: space-between;
   }
-  .monitor-fit .monitor-decode .monitor-spark,
-  .monitor-fit .monitor-memory .monitor-spark {
+  .app-fit .monitor-decode .monitor-spark,
+  .app-fit .monitor-memory .monitor-spark {
     margin-top: auto;
     margin-bottom: auto;
   }
-  .monitor-fit .monitor-memory #sysmem {
+  .app-fit .monitor-memory #sysmem {
     display: flex;
     height: 100%;
     flex-direction: column;
   }
-  .monitor-fit #gpus,
-  .monitor-fit #gpus > div,
-  .monitor-fit #slots {
+  .app-fit #gpus,
+  .app-fit #gpus > div,
+  .app-fit #slots {
     flex: 1;
   }
-  .monitor-fit #gpus,
-  .monitor-fit #gpus > div {
+  .app-fit #gpus,
+  .app-fit #gpus > div {
     display: grid;
   }
-  .monitor-fit #slots {
+  .app-fit #slots {
     grid-template-columns: minmax(0, 1fr);
   }
-  .monitor-fit #gpus > div {
+  .app-fit #gpus > div {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
   }
-  .monitor-fit .monitor-gpu > .space-y-3 {
+  .app-fit .monitor-gpu > .space-y-3 {
     display: flex;
     flex: 1;
     flex-direction: column;
     justify-content: space-around;
   }
-  .monitor-fit .monitor-slot > [role='progressbar'] {
+  .app-fit .monitor-slot > [role='progressbar'] {
     margin-top: auto;
   }
-  .monitor-fit .monitor-gpu strong {
+  .app-fit .monitor-gpu strong {
     font-size: 12px;
     overflow-wrap: anywhere;
   }
 }
 @media (max-width: 1279px) {
-  .monitor-fit {
+  .app-fit .monitor-layout {
     flex: none;
   }
 }
 @media (min-width: 1600px) {
-  .monitor-fit #slots {
+  .app-fit #slots {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @media (min-width: 1280px) and (max-height: 1100px) {
-  .monitor-fit .monitor-panel-header {
+  .app-fit .monitor-panel-header {
     padding: 12px 16px 4px;
   }
-  .monitor-fit .monitor-panel-content {
+  .app-fit .monitor-panel-content {
     padding-bottom: 12px;
   }
-  .monitor-fit .monitor-row {
+  .app-fit .monitor-row {
     padding: 4px 0;
   }
-  .monitor-fit .monitor-spark {
+  .app-fit .monitor-spark {
     height: 24px;
   }
-  .monitor-fit .monitor-decode .metric {
+  .app-fit .monitor-decode .metric {
     font-size: 2.4rem;
   }
 }
@@ -439,90 +439,193 @@ button:disabled {
   }
 }
 @media (min-width: 2200px) and (min-height: 1300px) {
-  .monitor-fit {
+  .app-fit .monitor-layout {
     gap: 18px;
   }
-  .monitor-fit .monitor-controls,
-  .monitor-fit .monitor-telemetry {
+  .app-fit .monitor-controls,
+  .app-fit .monitor-telemetry {
     gap: 18px;
   }
-  .monitor-fit .monitor-feature {
+  .app-fit .monitor-feature {
     padding: 26px;
   }
-  .monitor-fit .monitor-panel-header {
+  .app-fit .monitor-panel-header {
     padding: 24px 24px 12px;
   }
-  .monitor-fit .monitor-panel-content {
+  .app-fit .monitor-panel-content {
     padding: 0 24px 24px;
   }
-  .monitor-fit .configuration-header {
+  .app-fit .configuration-header {
     padding: 24px 24px 16px;
   }
-  .monitor-fit .configuration-content {
+  .app-fit .configuration-content {
     padding: 0 24px 24px;
     --configuration-gap: 20px;
   }
-  .monitor-fit .monitor-row {
+  .app-fit .monitor-row {
     padding: 10px 0;
   }
-  .monitor-fit .monitor-row > span {
+  .app-fit .monitor-row > span {
     font-size: 15px;
   }
-  .monitor-fit .monitor-slot,
-  .monitor-fit .monitor-gpu {
+  .app-fit .monitor-slot,
+  .app-fit .monitor-gpu {
     padding: 18px;
   }
-  .monitor-fit .launch-controls button,
-  .monitor-fit .configuration-content input,
-  .monitor-fit .configuration-content [role='combobox'],
-  .monitor-fit .configuration-content button:not([role='checkbox']) {
+  .app-fit .launch-controls button,
+  .app-fit .configuration-content input,
+  .app-fit .configuration-content [role='combobox'],
+  .app-fit .configuration-content button:not([role='checkbox']) {
     height: 38px;
     font-size: 14px;
   }
-  .monitor-fit .configuration-content label,
-  .monitor-fit .configuration-prompts strong,
-  .monitor-fit .monitor-gpu strong {
+  .app-fit .configuration-content label,
+  .app-fit .configuration-prompts strong,
+  .app-fit .monitor-gpu strong {
     font-size: 14px;
   }
-  .monitor-fit .monitor-telemetry {
+  .app-fit .monitor-telemetry {
     min-height: calc(100dvh - 320px);
     grid-template-rows: minmax(210px, auto) minmax(220px, auto) minmax(
         320px,
         1fr
       );
   }
-  .monitor-fit #slots {
+  .app-fit #slots {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .monitor-fit .monitor-spark {
+  .app-fit .monitor-spark {
     height: clamp(50px, 5vh, 110px);
   }
 }
 @media (min-width: 2200px) and (min-height: 1700px) {
-  .monitor-fit .monitor-panel-header .text-sm,
-  .monitor-fit .monitor-row > span,
-  .monitor-fit .monitor-slot strong,
-  .monitor-fit .monitor-gpu strong {
+  .app-fit .monitor-panel-header .text-sm,
+  .app-fit .monitor-row > span,
+  .app-fit .monitor-slot strong,
+  .app-fit .monitor-gpu strong {
     font-size: 1rem;
   }
-  .monitor-fit .monitor-feature .text-xs,
-  .monitor-fit .monitor-panel .text-xs,
-  .monitor-fit .configuration-content .text-xs,
-  .monitor-fit .configuration-content label,
-  .monitor-fit .configuration-prompts strong,
-  .monitor-fit .configuration-content input,
-  .monitor-fit .configuration-content [role='combobox'],
-  .monitor-fit .configuration-content button:not([role='checkbox']),
-  .monitor-fit .launch-controls button {
+  .app-fit .monitor-feature .text-xs,
+  .app-fit .monitor-panel .text-xs,
+  .app-fit .configuration-content .text-xs,
+  .app-fit .configuration-content label,
+  .app-fit .configuration-prompts strong,
+  .app-fit .configuration-content input,
+  .app-fit .configuration-content [role='combobox'],
+  .app-fit .configuration-content button:not([role='checkbox']),
+  .app-fit .launch-controls button {
     font-size: 0.85rem;
   }
-  .monitor-fit .monitor-panel .text-sm {
+  .app-fit .monitor-panel .text-sm {
     font-size: 0.95rem;
   }
-  .monitor-fit .monitor-decode .metric {
+  .app-fit .monitor-decode .metric {
     font-size: 4rem;
   }
 }
+/* Shared density is selected at the app shell; page layouts stay responsive. */
+.manage-layout,
+.history-layout {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+}
+.manage-panel-content button:not([role='checkbox']):not([role='combobox']) {
+  max-width: 100%;
+  height: auto;
+  min-height: 32px;
+  white-space: normal;
+}
+.manage-layout > *,
+.history-layout > * {
+  min-width: 0;
+}
+.app-fit .manage-layout,
+.app-fit .history-layout {
+  gap: 10px;
+}
+.app-fit .manage-panel-header,
+.app-fit .history-summary > div:first-child,
+.app-fit .history-explore > div:first-child {
+  padding: 14px 16px 8px;
+}
+.app-fit .manage-panel-content,
+.app-fit .history-summary > div:last-child,
+.app-fit .history-explore > div:last-child {
+  padding: 0 16px 14px;
+}
+.app-fit .manage-panel-content > :not(:last-child) {
+  margin-block-end: 12px;
+}
+.app-fit .history-summary .text-xl {
+  font-size: 16px;
+}
+.app-fit .history-summary .mt-2 {
+  margin-top: 4px;
+}
+.app-fit #history-status {
+  padding: 8px 12px;
+}
+.app-fit .history-filters {
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.app-fit .history-filters .space-y-2 > :not(:last-child) {
+  margin-block-end: 4px;
+}
+.app-fit .history-filters label {
+  font-size: 12px;
+}
+.app-fit .history-filters input,
+.app-fit .history-filters [role='combobox'] {
+  height: 32px;
+  min-width: 0;
+  font-size: 12px;
+}
+.history-filters > div,
+.history-pagination > * {
+  min-width: 0;
+}
+.history-records {
+  height: max(240px, 50dvh);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.history-table > div {
+  overflow: visible;
+}
+.history-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+}
+#history-mobile {
+  padding: 10px;
+}
+#history-mobile article {
+  min-width: 0;
+}
+@media (min-width: 1280px) {
+  .app-fit .manage-layout {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .app-fit #binary-panel {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .app-fit #gaming-panel {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+  .app-fit #startup-panel {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
 .metric {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.04em;

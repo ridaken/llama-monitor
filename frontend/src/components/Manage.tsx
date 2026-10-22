@@ -9,12 +9,12 @@ import type { LauncherController } from '@/hooks/useLauncher'
 export function Manage({ launcher }: { launcher: LauncherController }) {
   const { state, openBrowse } = launcher
   return (
-    <div className="space-y-5">
-      <Card className="surface rounded-2xl">
-        <CardHeader className="pb-2">
+    <div className="manage-layout">
+      <Card className="surface rounded-2xl" id="binary-panel">
+        <CardHeader className="manage-panel-header pb-2">
           <CardTitle className="text-sm">llama-server binary</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="manage-panel-content">
           {state?.runtime?.containerized && (
             <p className="mb-3 text-sm text-muted-foreground">
               Docker includes llama-server. Browse models under /models; host

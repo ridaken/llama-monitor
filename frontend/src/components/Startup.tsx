@@ -74,7 +74,7 @@ export function Startup() {
   const disabled = !state?.supported || !!state?.pending || busy
   return (
     <Card className="surface rounded-2xl" id="startup-panel">
-      <CardHeader>
+      <CardHeader className="manage-panel-header">
         <CardTitle>Windows startup</CardTitle>
         <CardDescription>
           Keep llama-monitor running in the background. Setup creates the
@@ -82,7 +82,7 @@ export function Startup() {
           optional.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="manage-panel-content space-y-4">
         <p id="startup-status" role="status" className="text-sm">
           {state?.pending
             ? 'Waiting for Windows setup to finish…'

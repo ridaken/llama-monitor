@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   CalendarRange,
   ChevronLeft,
@@ -71,6 +71,8 @@ const stateLabels: Record<string, string> = {
 }
 
 export function History({ active }: { active: boolean }) {
+  const recordsRef = useRef<HTMLDivElement>(null)
+  const paginationRef = useRef<HTMLDivElement>(null)
   const [filters, setFilters] = useState<Filters>(initialFilters)
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([null])
   const [pageIndex, setPageIndex] = useState(0)
@@ -122,6 +124,43 @@ export function History({ active }: { active: boolean }) {
       })
     return () => controller.abort()
   }, [active, params, revision])
+  useLayoutEffect(() => {
+    if (!active || !recordsRef.current) return
+    const records = recordsRef.current
+    const measure = () => {
+      const pagination = paginationRef.current
+      const footer = document.querySelector('.app-body > footer')
+      const body = document.querySelector('.app-body')
+      if (!pagination || !footer || !body) return
+      const paginationStyle = getComputedStyle(pagination)
+      const footerStyle = getComputedStyle(footer)
+      const contentStyle = getComputedStyle(records.parentElement!)
+      const reserved =
+        pagination.getBoundingClientRect().height +
+        parseFloat(paginationStyle.marginTop) +
+        parseFloat(contentStyle.paddingBottom) +
+        2 +
+        footer.getBoundingClientRect().height +
+        parseFloat(footerStyle.marginTop) +
+        parseFloat(getComputedStyle(body).paddingBottom)
+      const top = records.getBoundingClientRect().top + window.scrollY
+      records.style.height = `${Math.max(240, window.innerHeight - top - reserved)}px`
+    }
+    const observer = new ResizeObserver(measure)
+    // Observe chrome and filters, not the records whose height we set.
+    document
+      .querySelectorAll(
+        '.app-shell > header, .app-body > div, .app-body > nav, .app-body > footer, .history-summary, .history-filters',
+      )
+      .forEach((element) => observer.observe(element))
+    if (paginationRef.current) observer.observe(paginationRef.current)
+    window.addEventListener('resize', measure)
+    measure()
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [active, result, error, loading])
   const change = (key: keyof Filters, value: string) => {
     setFilters((old) => ({ ...old, [key]: value }))
     setCursorStack([null])
@@ -169,8 +208,8 @@ export function History({ active }: { active: boolean }) {
   const models = result?.models || []
   const rows = result?.items || []
   return (
-    <div className="space-y-5">
-      <Card className="surface rounded-2xl">
+    <div className="history-layout">
+      <Card className="surface history-summary rounded-2xl">
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -203,7 +242,7 @@ export function History({ active }: { active: boolean }) {
           </p>
         </CardContent>
       </Card>
-      <Card className="surface rounded-2xl">
+      <Card className="surface history-explore rounded-2xl">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Search className="size-4 text-primary" />
@@ -211,7 +250,7 @@ export function History({ active }: { active: boolean }) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="history-filters mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <div className="space-y-2">
               <Label htmlFor="history-model">Model</Label>
               <Select
@@ -313,197 +352,210 @@ export function History({ active }: { active: boolean }) {
             </p>
           ) : (
             <>
-              <div id="history-mobile" className="space-y-3 sm:hidden">
-                {rows.map((item) => (
-                  <article
-                    key={item.id}
-                    className="rounded-xl border border-border bg-background/30 p-4"
-                  >
-                    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(item.observed_at * 1000).toLocaleString()}
-                        </p>
-                        <h3 className="mt-1 break-all font-semibold">
-                          {item.model || 'Unknown model'}
-                        </h3>
-                      </div>
-                      <Badge
-                        variant={
-                          item.state === 'complete' ? 'default' : 'secondary'
-                        }
-                      >
-                        {stateLabels[item.state] || item.state}
-                      </Badge>
-                    </div>
-                    <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-                      <div>
-                        <dt className="text-muted-foreground">
-                          Run / slot / task
-                        </dt>
-                        <dd className="mono mt-1">
-                          {item.run_id.slice(0, 8)} / {item.slot_id ?? '?'} /{' '}
-                          {item.task_id ?? '?'}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Prompt tokens</dt>
-                        <dd className="mt-1">{fmt(item.prompt_tokens)}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Generated</dt>
-                        <dd className="mt-1">{fmt(item.generated_tokens)}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Prefill</dt>
-                        <dd className="mt-1">
-                          {item.prompt_seconds == null
-                            ? '—'
-                            : `${fmt(item.prompt_seconds, 2)}s`}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Decode</dt>
-                        <dd className="mt-1">
-                          {item.decode_seconds == null
-                            ? '—'
-                            : `${fmt(item.decode_seconds, 2)}s`}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">Total</dt>
-                        <dd className="mt-1">
-                          {item.total_seconds == null
-                            ? '—'
-                            : `${fmt(item.total_seconds, 2)}s`}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-muted-foreground">
-                          Draft accepted / generated
-                        </dt>
-                        <dd className="mt-1">
-                          {item.draft_generated == null
-                            ? '—'
-                            : `${item.draft_accepted}/${item.draft_generated}`}
-                        </dd>
-                      </div>
-                    </dl>
-                    {item.has_prompt && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-4"
-                        onClick={() => viewPrompt(item)}
-                      >
-                        <Eye />
-                        View prompt
-                      </Button>
-                    )}
-                  </article>
-                ))}
-                {!rows.length && (
-                  <p className="rounded-xl border border-border p-8 text-center text-sm text-muted-foreground">
-                    No observed generations match these filters.
-                  </p>
-                )}
-              </div>
-              <div className="hidden overflow-x-auto rounded-xl border border-border sm:block">
-                <Table className="min-w-[1100px]">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Observed</TableHead>
-                      <TableHead>Model</TableHead>
-                      <TableHead>State</TableHead>
-                      <TableHead>Run / slot / task</TableHead>
-                      <TableHead>Prompt</TableHead>
-                      <TableHead>Prompt tokens</TableHead>
-                      <TableHead>Generated</TableHead>
-                      <TableHead>Prefill</TableHead>
-                      <TableHead>Decode</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Draft</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody id="history-body">
-                    {rows.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="whitespace-nowrap">
-                          {new Date(item.observed_at * 1000).toLocaleString()}
-                        </TableCell>
-                        <TableCell
-                          className="max-w-44 truncate"
-                          title={item.model || ''}
+              <div
+                ref={recordsRef}
+                className="history-records focus-ring"
+                role="region"
+                aria-label="History records"
+                tabIndex={0}
+              >
+                <div id="history-mobile" className="space-y-3 sm:hidden">
+                  {rows.map((item) => (
+                    <article
+                      key={item.id}
+                      className="rounded-xl border border-border bg-background/30 p-4"
+                    >
+                      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(item.observed_at * 1000).toLocaleString()}
+                          </p>
+                          <h3 className="mt-1 break-all font-semibold">
+                            {item.model || 'Unknown model'}
+                          </h3>
+                        </div>
+                        <Badge
+                          variant={
+                            item.state === 'complete' ? 'default' : 'secondary'
+                          }
                         >
-                          {item.model || '—'}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              item.state === 'complete'
-                                ? 'default'
-                                : 'secondary'
-                            }
-                          >
-                            {stateLabels[item.state] || item.state}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="mono text-xs">
-                          {item.run_id.slice(0, 8)} / {item.slot_id ?? '?'} /{' '}
-                          {item.task_id ?? '?'}
-                        </TableCell>
-                        <TableCell>
-                          {item.has_prompt ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => viewPrompt(item)}
-                            >
-                              <Eye />
-                              View prompt
-                            </Button>
-                          ) : (
-                            '—'
-                          )}
-                        </TableCell>
-                        <TableCell>{fmt(item.prompt_tokens)}</TableCell>
-                        <TableCell>{fmt(item.generated_tokens)}</TableCell>
-                        <TableCell>
-                          {item.prompt_seconds == null
-                            ? '—'
-                            : `${fmt(item.prompt_seconds, 2)}s`}
-                        </TableCell>
-                        <TableCell>
-                          {item.decode_seconds == null
-                            ? '—'
-                            : `${fmt(item.decode_seconds, 2)}s`}
-                        </TableCell>
-                        <TableCell>
-                          {item.total_seconds == null
-                            ? '—'
-                            : `${fmt(item.total_seconds, 2)}s`}
-                        </TableCell>
-                        <TableCell>
-                          {item.draft_generated == null
-                            ? '—'
-                            : `${item.draft_accepted}/${item.draft_generated}`}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!rows.length && (
+                          {stateLabels[item.state] || item.state}
+                        </Badge>
+                      </div>
+                      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                        <div>
+                          <dt className="text-muted-foreground">
+                            Run / slot / task
+                          </dt>
+                          <dd className="mono mt-1">
+                            {item.run_id.slice(0, 8)} / {item.slot_id ?? '?'} /{' '}
+                            {item.task_id ?? '?'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">
+                            Prompt tokens
+                          </dt>
+                          <dd className="mt-1">{fmt(item.prompt_tokens)}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Generated</dt>
+                          <dd className="mt-1">{fmt(item.generated_tokens)}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Prefill</dt>
+                          <dd className="mt-1">
+                            {item.prompt_seconds == null
+                              ? '—'
+                              : `${fmt(item.prompt_seconds, 2)}s`}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Decode</dt>
+                          <dd className="mt-1">
+                            {item.decode_seconds == null
+                              ? '—'
+                              : `${fmt(item.decode_seconds, 2)}s`}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Total</dt>
+                          <dd className="mt-1">
+                            {item.total_seconds == null
+                              ? '—'
+                              : `${fmt(item.total_seconds, 2)}s`}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">
+                            Draft accepted / generated
+                          </dt>
+                          <dd className="mt-1">
+                            {item.draft_generated == null
+                              ? '—'
+                              : `${item.draft_accepted}/${item.draft_generated}`}
+                          </dd>
+                        </div>
+                      </dl>
+                      {item.has_prompt && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-4"
+                          onClick={() => viewPrompt(item)}
+                        >
+                          <Eye />
+                          View prompt
+                        </Button>
+                      )}
+                    </article>
+                  ))}
+                  {!rows.length && (
+                    <p className="rounded-xl border border-border p-8 text-center text-sm text-muted-foreground">
+                      No observed generations match these filters.
+                    </p>
+                  )}
+                </div>
+                <div className="history-table hidden sm:block">
+                  <Table className="min-w-[1100px]">
+                    <TableHeader>
                       <TableRow>
-                        <TableCell
-                          colSpan={11}
-                          className="py-12 text-center text-muted-foreground"
-                        >
-                          No observed generations match these filters.
-                        </TableCell>
+                        <TableHead>Observed</TableHead>
+                        <TableHead>Model</TableHead>
+                        <TableHead>State</TableHead>
+                        <TableHead>Run / slot / task</TableHead>
+                        <TableHead>Prompt</TableHead>
+                        <TableHead>Prompt tokens</TableHead>
+                        <TableHead>Generated</TableHead>
+                        <TableHead>Prefill</TableHead>
+                        <TableHead>Decode</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead>Draft</TableHead>
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody id="history-body">
+                      {rows.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="whitespace-nowrap">
+                            {new Date(item.observed_at * 1000).toLocaleString()}
+                          </TableCell>
+                          <TableCell
+                            className="max-w-44 truncate"
+                            title={item.model || ''}
+                          >
+                            {item.model || '—'}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={
+                                item.state === 'complete'
+                                  ? 'default'
+                                  : 'secondary'
+                              }
+                            >
+                              {stateLabels[item.state] || item.state}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="mono text-xs">
+                            {item.run_id.slice(0, 8)} / {item.slot_id ?? '?'} /{' '}
+                            {item.task_id ?? '?'}
+                          </TableCell>
+                          <TableCell>
+                            {item.has_prompt ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => viewPrompt(item)}
+                              >
+                                <Eye />
+                                View prompt
+                              </Button>
+                            ) : (
+                              '—'
+                            )}
+                          </TableCell>
+                          <TableCell>{fmt(item.prompt_tokens)}</TableCell>
+                          <TableCell>{fmt(item.generated_tokens)}</TableCell>
+                          <TableCell>
+                            {item.prompt_seconds == null
+                              ? '—'
+                              : `${fmt(item.prompt_seconds, 2)}s`}
+                          </TableCell>
+                          <TableCell>
+                            {item.decode_seconds == null
+                              ? '—'
+                              : `${fmt(item.decode_seconds, 2)}s`}
+                          </TableCell>
+                          <TableCell>
+                            {item.total_seconds == null
+                              ? '—'
+                              : `${fmt(item.total_seconds, 2)}s`}
+                          </TableCell>
+                          <TableCell>
+                            {item.draft_generated == null
+                              ? '—'
+                              : `${item.draft_accepted}/${item.draft_generated}`}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {!rows.length && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={11}
+                            className="py-12 text-center text-muted-foreground"
+                          >
+                            No observed generations match these filters.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <div
+                ref={paginationRef}
+                className="history-pagination mt-4 flex flex-wrap items-center justify-between gap-3"
+              >
                 <span
                   id="history-path"
                   className="mono flex items-center gap-2 break-all text-xs text-muted-foreground"

@@ -72,7 +72,7 @@ export function Gaming() {
   if (state?.supported === false) {
     return (
       <Card className="surface rounded-2xl" id="gaming-panel">
-        <CardHeader>
+        <CardHeader className="manage-panel-header">
           <CardTitle>Moonlight gaming integration</CardTitle>
           <CardDescription>
             Apollo gaming integration requires the native Windows installation.
@@ -84,14 +84,14 @@ export function Gaming() {
   }
   return (
     <Card className="surface rounded-2xl" id="gaming-panel">
-      <CardHeader>
+      <CardHeader className="manage-panel-header">
         <CardTitle>Moonlight gaming integration</CardTitle>
         <CardDescription>
           Release AI memory on connection. Restore the previous models after 60
           seconds; retry failed loads once after another 60 seconds.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="manage-panel-content space-y-4">
         <p className="text-sm text-muted-foreground">
           Requires the{' '}
           <a
@@ -107,9 +107,9 @@ export function Gaming() {
         </p>
         <p id="gaming-status" role="status" className="text-sm">
           {gamingLabel(state || undefined) ||
-            (state?.enabled ? 'Enabled · AI available' : 'Disabled')}
+            (state?.enabled ? 'Enabled Â· AI available' : 'Disabled')}
           {state?.enabled && state.connected_clients != null
-            ? ` · ${state.connected_clients} connected client(s)`
+            ? ` Â· ${state.connected_clients} connected client(s)`
             : ''}
         </p>
         {state?.integration_error && (
@@ -148,7 +148,7 @@ export function Gaming() {
               disabled={blocked}
               placeholder={
                 state?.credentials_saved
-                  ? 'Saved securely · leave blank to keep'
+                  ? 'Saved securely Â· leave blank to keep'
                   : 'Required for connection tracking'
               }
             />
@@ -230,7 +230,8 @@ export function Gaming() {
                 className="flex flex-wrap items-center gap-2 text-sm"
               >
                 <span>
-                  {server.name} · {server.status} · attempt {server.attempts}/2
+                  {server.name} Â· {server.status} Â· attempt {server.attempts}
+                  /2
                 </span>
                 {server.error && (
                   <span className="text-amber-300">{server.error}</span>
