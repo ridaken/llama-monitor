@@ -291,6 +291,19 @@ def test_launch_spawns_detached(good_settings, fake_popen):
         assert kw.get("start_new_session") is True
 
 
+def test_real_child_startup_output_survives_early_exit(good_settings, monkeypatch):
+    mgr = ServerManager(lambda *a: None)
+    monkeypatch.setattr(mgr, "build_argv", lambda *a: [sys.executable, "-c",
+        "import sys; print('startup stdout', flush=True); sys.stderr.write('early loader error'); sys.exit(7)"])
+    mgr.launch({"model_path": _gguf(good_settings), "port": 8001})
+    if mgr._proc is not None:
+        mgr._proc.wait(timeout=10)
+    assert mgr.status()["exit_code"] == 7
+    with open(launcher.startup_log_path(), encoding="utf-8") as output:
+        assert output.read().splitlines() == ["startup stdout", "early loader error"]
+    assert os.path.getsize(store.MANAGED_LOG) == 0
+
+
 def test_launch_persists_running_record_and_stop_clears_it(good_settings, fake_popen):
     mgr = ServerManager(lambda *a: None)
     mgr.launch({"name": "c1", "model_path": _gguf(good_settings), "port": 9001})

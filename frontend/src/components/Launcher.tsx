@@ -10,6 +10,7 @@ import {
   Search,
   Square,
   Star,
+  Stethoscope,
   Terminal,
   Trash2,
   X,
@@ -138,6 +139,63 @@ export function LaunchControls({ launcher }: { launcher: LauncherController }) {
         </p>
       )}
       <LauncherFeedback launcher={launcher} target="launch" />
+      {status === 'exited' && (
+        <p className="text-xs text-amber-300" role="status">
+          llama-server exited with code {state?.status.exit_code}. Open Console
+          for startup output. A crash code alone does not identify its cause.
+        </p>
+      )}
+      {launcher.diagnosticsError && (
+        <p role="alert" className="text-xs text-red-300">
+          {launcher.diagnosticsError}
+        </p>
+      )}
+      {launcher.diagnosing && (
+        <p role="status" className="text-xs">
+          Checking startup diagnostics…
+        </p>
+      )}
+      {launcher.diagnostics && (
+        <div
+          id="lx-diagnostics"
+          className="space-y-2 rounded-lg border p-3 text-xs"
+        >
+          <p role="status">{launcher.diagnostics.summary}</p>
+          {launcher.diagnostics.checks.map((check) => (
+            <details key={check.name} open={check.state === 'fail'}>
+              <summary className="cursor-pointer">
+                {check.name === 'nvidia'
+                  ? 'NVIDIA access'
+                  : 'Server device initialization'}
+                : {check.state} — {check.message}
+              </summary>
+              {check.output && (
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">
+                  {check.output}
+                </pre>
+              )}
+              {check.truncated && <p>Showing the last 16 KiB of output.</p>}
+            </details>
+          ))}
+          {launcher.diagnostics.recovery.length > 0 && (
+            <div className="space-y-2 text-amber-300">
+              <p className="font-medium">Recovery guidance</p>
+              {launcher.diagnostics.recovery.map((step) => (
+                <p key={step}>{step}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {(launcher.diagnostics || launcher.diagnosticsError) && (
+        <Button
+          id="lx-doctor-retry"
+          variant="outline"
+          onClick={launcher.runDiagnostics}
+        >
+          <Stethoscope /> Run diagnostics again
+        </Button>
+      )}
     </div>
   )
 }
@@ -806,6 +864,17 @@ export function LauncherDialogs({
               onClick={() => setModal(null)}
             >
               Close
+            </Button>
+            <Button
+              id="lx-doctor"
+              variant="outline"
+              disabled={launcher.diagnosing}
+              onClick={() => {
+                setModal(null)
+                launcher.runDiagnostics()
+              }}
+            >
+              <Stethoscope /> Run diagnostics
             </Button>
           </DialogFooter>
         </DialogContent>

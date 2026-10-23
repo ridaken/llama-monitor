@@ -160,6 +160,15 @@ def test_smoke_has_explicit_deadline(invoke):
     assert calls[0].extensions["timeout"]["read"] == 32
 
 
+@pytest.mark.parametrize("healthy", [True, False])
+def test_doctor_preserves_report_and_exit_code(invoke, healthy):
+    report = {"healthy": healthy, "summary": "diagnostic result", "checks": [], "recovery": []}
+    code, output, calls = invoke(["doctor"], lambda _: report)
+    assert code == (0 if healthy else 1)
+    assert output["ok"] == healthy and output["data"] == report
+    assert calls[0].url.path == "/api/launcher/doctor" and calls[0].method == "GET"
+
+
 @pytest.mark.parametrize("url", ["file:///tmp/backend", "http://host:bad", "http://[bad", "http://user:password@host", "http://host/?query=1"])
 def test_invalid_url_is_an_input_error(invoke, url):
     code, _, calls = invoke(["--url", url, "status"], lambda _: pytest.fail("no request"))

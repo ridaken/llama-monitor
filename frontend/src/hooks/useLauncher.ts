@@ -3,6 +3,7 @@ import { api, post } from '@/api'
 import { basename } from '@/lib/utils'
 import type {
   Config,
+  DoctorReport,
   Flag,
   FlagResponse,
   KnownFlag,
@@ -92,6 +93,40 @@ export function useLauncher() {
   const [consoleText, setConsoleText] = useState('')
   const [consolePath, setConsolePath] = useState('')
   const [consoleOffset, setConsoleOffset] = useState(0)
+  const consoleSourceRef = useRef('')
+  const [diagnostics, setDiagnostics] = useState<DoctorReport | null>(null)
+  const [diagnosticsError, setDiagnosticsError] = useState('')
+  const [diagnosing, setDiagnosing] = useState(false)
+  const diagnosticRequest = useRef(0)
+  const runDiagnostics = useCallback(async () => {
+    const request = ++diagnosticRequest.current
+    setDiagnosing(true)
+    setDiagnostics(null)
+    setDiagnosticsError('')
+    try {
+      const result = await api<DoctorReport>('/api/launcher/doctor')
+      if (request === diagnosticRequest.current) setDiagnostics(result)
+    } catch (error) {
+      if (request === diagnosticRequest.current)
+        setDiagnosticsError(
+          `Could not run diagnostics: ${(error as Error).message}`,
+        )
+    } finally {
+      if (request === diagnosticRequest.current) setDiagnosing(false)
+    }
+  }, [])
+  useEffect(() => {
+    if (state?.status.state === 'exited') runDiagnostics()
+    else {
+      ++diagnosticRequest.current
+      setDiagnostics(null)
+      setDiagnosticsError('')
+      setDiagnosing(false)
+    }
+    return () => {
+      ++diagnosticRequest.current
+    }
+  }, [state?.status.state, state?.status.started_at, runDiagnostics])
   const consoleOffsetRef = useRef(0)
   const consoleHasRef = useRef(false)
   const consolePreRef = useRef<HTMLPreElement>(null)
@@ -502,6 +537,7 @@ export function useLauncher() {
     let live = true
     let pending = false
     consoleOffsetRef.current = 0
+    consoleSourceRef.current = ''
     consoleHasRef.current = false
     consoleStickRef.current = true
     setConsoleText('')
@@ -515,13 +551,18 @@ export function useLauncher() {
           content: string
           offset: number
           path: string
-        }>(`/api/launcher/console?offset=${consoleOffsetRef.current}`)
+          source?: string
+        }>(
+          `/api/launcher/console?offset=${consoleOffsetRef.current}&source=${consoleSourceRef.current}`,
+        )
         if (!live) return
         setConsolePath(result.path || '')
         if (result.content) {
           const clean = result.content.replace(/\x1b\[[0-9;]*m/g, '')
           const replace =
-            !consoleHasRef.current || result.offset < consoleOffsetRef.current
+            !consoleHasRef.current ||
+            result.offset < consoleOffsetRef.current ||
+            (result.source || '') !== consoleSourceRef.current
           setConsoleText((previous) => (replace ? clean : previous + clean))
           consoleHasRef.current = true
         } else if (!consoleHasRef.current)
@@ -531,6 +572,7 @@ export function useLauncher() {
               : '(no log yet — launch a server from Monitor)',
           )
         consoleOffsetRef.current = result.offset
+        consoleSourceRef.current = result.source || ''
         setConsoleOffset(result.offset)
         requestAnimationFrame(() => {
           if (consoleStickRef.current && consolePreRef.current)
@@ -564,6 +606,10 @@ export function useLauncher() {
         : 'Stopped'
   return {
     launchAction,
+    diagnostics,
+    diagnosticsError,
+    diagnosing,
+    runDiagnostics,
     state,
     draft,
     loaded,

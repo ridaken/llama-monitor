@@ -109,6 +109,11 @@ def resolve_binary(path: Optional[str]) -> Optional[str]:
     return shutil.which(path or "llama-server")
 
 
+def startup_log_path() -> str:
+    """Separate process output from the structured log used for history."""
+    return store.MANAGED_LOG + ".startup"
+
+
 class ServerManager:
     """Owns the lifecycle of a single launched llama-server process."""
 
@@ -282,14 +287,18 @@ class ServerManager:
             except Exception:
                 pass
             try:
-                self._proc = subprocess.Popen(
-                    argv,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    cwd=cwd,
-                    creationflags=_DETACH_FLAGS,
-                    **_DETACH_KW,
-                )
+                # A loader/CUDA crash can precede --log-file initialization.
+                # A file (rather than a pipe/thread) also survives this backend.
+                with open(startup_log_path(), "wb") as output:
+                    self._proc = subprocess.Popen(
+                        argv,
+                        stdin=subprocess.DEVNULL,
+                        stdout=output,
+                        stderr=subprocess.STDOUT,
+                        cwd=cwd,
+                        creationflags=_DETACH_FLAGS,
+                        **_DETACH_KW,
+                    )
             except Exception as e:
                 self._proc = None
                 self.last_error = str(e)

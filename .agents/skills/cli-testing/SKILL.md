@@ -55,6 +55,14 @@ On a task-owned backend:
 5. Exercise `restart --wait --json` if relevant, then `stop --json` and verify
    the stopped state. Shut down only the test's backend/Compose project.
 
+For startup failures, use `doctor --json` and `logs --tail 100 --json` before
+changing model flags. Doctor probes server device initialization and NVIDIA access
+without loading a model; skipped NVIDIA checks are unverified coverage. Exit 1
+retains the diagnostic report in `data` alongside `error`. Console/logs fall back
+to captured process output if the managed log is empty. Exit -11 alone does not
+establish a GPU fault. See README's **Model startup troubleshooting** for recovery;
+Docker/WSL restarts affect other workloads and need task authorization.
+
 `status` exit 0 means the backend responded, including when the model is stopped.
 Readiness requires the managed process to own the listener and return healthy.
 Smoke sends one fixed 16-token chat request and accepts answer or reasoning text;
