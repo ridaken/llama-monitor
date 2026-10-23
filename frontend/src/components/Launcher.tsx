@@ -125,19 +125,6 @@ export function LaunchControls({ launcher }: { launcher: LauncherController }) {
           <Terminal />
           Console
         </Button>
-        <Button
-          id="lx-doctor"
-          variant="outline"
-          size="icon"
-          aria-label="Run diagnostics"
-          title={
-            launcher.diagnosing ? 'Checking diagnostics…' : 'Run diagnostics'
-          }
-          disabled={launcher.diagnosing}
-          onClick={launcher.runDiagnostics}
-        >
-          <Stethoscope className={launcher.diagnosing ? 'animate-pulse' : ''} />
-        </Button>
       </div>
       {state && !state.binary_valid && (
         <p className="text-xs text-amber-300">
@@ -161,6 +148,11 @@ export function LaunchControls({ launcher }: { launcher: LauncherController }) {
       {launcher.diagnosticsError && (
         <p role="alert" className="text-xs text-red-300">
           {launcher.diagnosticsError}
+        </p>
+      )}
+      {launcher.diagnosing && (
+        <p role="status" className="text-xs">
+          Checking startup diagnostics…
         </p>
       )}
       {launcher.diagnostics && (
@@ -194,6 +186,15 @@ export function LaunchControls({ launcher }: { launcher: LauncherController }) {
             </div>
           )}
         </div>
+      )}
+      {(launcher.diagnostics || launcher.diagnosticsError) && (
+        <Button
+          id="lx-doctor-retry"
+          variant="outline"
+          onClick={launcher.runDiagnostics}
+        >
+          <Stethoscope /> Run diagnostics again
+        </Button>
       )}
     </div>
   )
@@ -863,6 +864,17 @@ export function LauncherDialogs({
               onClick={() => setModal(null)}
             >
               Close
+            </Button>
+            <Button
+              id="lx-doctor"
+              variant="outline"
+              disabled={launcher.diagnosing}
+              onClick={() => {
+                setModal(null)
+                launcher.runDiagnostics()
+              }}
+            >
+              <Stethoscope /> Run diagnostics
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -61,7 +61,7 @@ test('a crashed server shows evidence and recovery without restarting anything',
   await page.waitForTimeout(2500)
   expect(probes).toBe(1)
   expect(calls.filter((call) => call.startsWith('POST '))).toEqual([])
-  await page.locator('#lx-doctor').click()
+  await page.locator('#lx-doctor-retry').click()
   await expect.poll(() => probes).toBe(2)
 })
 
@@ -85,7 +85,9 @@ test('manual diagnostics report skipped NVIDIA checks without GPU recovery advic
     }),
   })
   await page.goto('/')
+  await page.locator('#lx-console').click()
   await page.locator('#lx-doctor').click()
+  await expect(page.locator('#console-out')).not.toBeVisible()
   await expect(page.locator('#lx-diagnostics')).toContainText('skipped')
   await expect(page.locator('#lx-diagnostics')).not.toContainText(
     'Recovery guidance',

@@ -215,7 +215,7 @@ A timed-out submitted operation may still complete; inspect state before retryin
 
 ### Model startup troubleshooting
 
-The **Run diagnostics** button and `python cli.py doctor --json` run the same
+The **Run diagnostics** button in Console and `python cli.py doctor --json` run the same
 read-only checks on the backend: `llama-server --list-devices` and, when installed,
 `nvidia-smi`. Each subprocess has a four-second timeout and returns at most the
 last 16 KiB of output. The dashboard runs these checks once when it observes a
