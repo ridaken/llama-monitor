@@ -23,6 +23,13 @@ test('compact chrome keeps page titles accessible and status readable across vie
       await expect(page.locator('header #updated')).toContainText('active')
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(title)
       await expect(page.getByText('Workspace', { exact: true })).toHaveCount(0)
+      await expect(page.locator('.app-body > footer')).toHaveCount(0)
+      await expect(
+        page.getByText('Local llama-server monitoring', { exact: true }),
+      ).toHaveCount(0)
+      await expect(
+        page.getByText('Data stays on this machine', { exact: true }),
+      ).toHaveCount(0)
       await page.evaluate(() => window.scrollTo(0, 0))
       await expect(page.locator('header #updated')).toBeInViewport({ ratio: 1 })
       const geometry = await page.evaluate(() => {

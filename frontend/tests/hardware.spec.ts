@@ -182,6 +182,20 @@ for (const mode of ['Fit', 'Comfortable']) {
     await expect(page.locator('.layer-placement')).toContainText(
       Array(4).fill('No model loaded'),
     )
+    const footer = page.locator('.monitor-hardware-footer')
+    const alignment = await footer.evaluate((el) => {
+      const note = el.querySelector('#placement-note')!
+      const total = el.querySelector('#gpu-total-w')!
+      return {
+        offset: Math.abs(
+          note.getBoundingClientRect().top - total.getBoundingClientRect().top,
+        ),
+        noteSize: getComputedStyle(note).fontSize,
+        totalSize: getComputedStyle(total).fontSize,
+      }
+    })
+    expect(alignment.offset).toBeLessThan(1)
+    expect(alignment.noteSize).toBe(alignment.totalSize)
     await expect
       .poll(() =>
         page.locator('.hardware-grid > *').evaluateAll((cards) => {
@@ -194,6 +208,22 @@ for (const mode of ['Fit', 'Comfortable']) {
       await page
         .locator('.monitor-hardware')
         .screenshot({ path: `test-results/hardware-unloaded-${mode}.png` })
+    await page.setViewportSize({ width: 320, height: 900 })
+    await expect
+      .poll(() =>
+        footer.evaluate((el) => {
+          const total = el
+            .querySelector('#gpu-total-w')!
+            .getBoundingClientRect()
+          const note = el
+            .querySelector('#placement-note')!
+            .getBoundingClientRect()
+          return (
+            el.scrollWidth <= el.clientWidth + 1 && total.top >= note.bottom - 1
+          )
+        }),
+      )
+      .toBe(true)
   })
 }
 
@@ -527,6 +557,7 @@ test('CPU-only placement and Docker RAM remain available without NVML', async ({
   await expect(page.locator('.monitor-cpu')).toContainText('Assigned here')
   await expect(page.locator('.monitor-gpu')).toHaveCount(0)
   await expect(page.locator('#gpu-error')).toContainText('NVML unavailable')
+  await expect(page.locator('#gpu-total-w')).toHaveCount(0)
 })
 
 test('remapped identities and unmatched accelerators retain their own placement cards', async ({

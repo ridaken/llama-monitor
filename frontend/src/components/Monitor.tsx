@@ -655,27 +655,37 @@ export function Monitor({
                 </div>
               ))}
             </div>
-            {placement?.reason && (
-              <p
-                id="placement-note"
-                className="mt-3 text-xs text-muted-foreground"
-              >
-                {placement.reason}
-              </p>
+            {(placement?.reason ||
+              !d?.gpu?.ok ||
+              !!d?.gpu?.devices?.length) && (
+              <div className="monitor-hardware-footer mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                {(placement?.reason || !d?.gpu?.ok) && (
+                  <div className="min-w-0 flex-1 basis-48 space-y-1 [overflow-wrap:anywhere]">
+                    {placement?.reason && (
+                      <p id="placement-note">{placement.reason}</p>
+                    )}
+                    {!d?.gpu?.ok && (
+                      <p id="gpu-error">{d?.gpu?.error || 'No GPU data.'}</p>
+                    )}
+                  </div>
+                )}
+                {!!d?.gpu?.devices?.length && (
+                  <p
+                    id="gpu-total-w"
+                    className="ml-auto shrink-0 whitespace-nowrap text-right"
+                  >
+                    Total draw{' '}
+                    {fmt(
+                      d.gpu.devices.reduce(
+                        (sum, device) => sum + (device.power || 0),
+                        0,
+                      ),
+                    )}{' '}
+                    W
+                  </p>
+                )}
+              </div>
             )}
-            {!d?.gpu?.ok && (
-              <p id="gpu-error" className="mt-3 text-xs text-muted-foreground">
-                {d?.gpu?.error || 'No GPU data.'}
-              </p>
-            )}
-            <div
-              id="gpu-total-w"
-              className="mt-4 text-right text-sm text-muted-foreground"
-            >
-              {d?.gpu?.devices?.length
-                ? `Total draw ${fmt(d.gpu.devices.reduce((sum, device) => sum + (device.power || 0), 0))} W`
-                : ''}
-            </div>
           </Panel>
         </div>
       </div>

@@ -300,7 +300,7 @@ button:disabled {
   margin-block-end: 6px;
 }
 .app-fit .monitor-gpu > .mt-4,
-.app-fit #gpu-total-w {
+.app-fit .monitor-hardware-footer {
   margin-top: 10px;
 }
 @media (min-width: 1280px) {

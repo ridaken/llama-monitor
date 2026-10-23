@@ -129,19 +129,15 @@ export function History({ active }: { active: boolean }) {
     const records = recordsRef.current
     const measure = () => {
       const pagination = paginationRef.current
-      const footer = document.querySelector('.app-body > footer')
       const body = document.querySelector('.app-body')
-      if (!pagination || !footer || !body) return
+      if (!pagination || !body) return
       const paginationStyle = getComputedStyle(pagination)
-      const footerStyle = getComputedStyle(footer)
       const contentStyle = getComputedStyle(records.parentElement!)
       const reserved =
         pagination.getBoundingClientRect().height +
         parseFloat(paginationStyle.marginTop) +
         parseFloat(contentStyle.paddingBottom) +
         2 +
-        footer.getBoundingClientRect().height +
-        parseFloat(footerStyle.marginTop) +
         parseFloat(getComputedStyle(body).paddingBottom)
       const top = records.getBoundingClientRect().top + window.scrollY
       records.style.height = `${Math.max(240, window.innerHeight - top - reserved)}px`
@@ -150,7 +146,7 @@ export function History({ active }: { active: boolean }) {
     // Observe chrome and filters, not the records whose height we set.
     document
       .querySelectorAll(
-        '.app-shell > header, .app-body > nav, .app-body > footer, .history-summary, .history-filters',
+        '.app-shell > header, .app-body > nav, .history-summary, .history-filters',
       )
       .forEach((element) => observer.observe(element))
     if (paginationRef.current) observer.observe(paginationRef.current)
