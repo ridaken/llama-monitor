@@ -338,8 +338,13 @@ def test_layer_placement_stats_and_idle_polling(client, monkeypatch, state, onli
     from history import LogFollower
     from placement import LayerPlacement
     parser = LayerPlacement()
-    for msg in ["print_info: n_layer = 1", "load_tensors: layer 0 assigned to device CPU",
-                "load_tensors: layer 1 assigned to device CPU"]:
+    for msg in ["fitting params to device memory ...", "print_info: n_layer = 3",
+                "load_tensors: layer 0 assigned to device CUDA9",
+                "fitting params to free memory took 0.1 seconds",
+                "print_info: n_layer = 1", "print_info: n_layer_all = 2",
+                "load_tensors: layer 0 assigned to device CPU",
+                "load_tensors: layer 1 assigned to device CUDA9",
+                "load_tensors: layer 2 assigned to device CPU"]:
         parser.feed(msg)
     original = LogFollower.snapshot
     monkeypatch.setattr(LogFollower, "snapshot", lambda self: {
