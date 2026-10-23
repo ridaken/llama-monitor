@@ -21,7 +21,7 @@ export function useMonitorFit() {
       [
         innerWidth,
         innerHeight,
-        root.getBoundingClientRect().top,
+        root.getBoundingClientRect().top + window.scrollY,
         ...sections.flatMap((el) => [
           el.offsetWidth,
           el.offsetHeight,
@@ -41,6 +41,8 @@ export function useMonitorFit() {
         return
       }
       if (geometry() === lastGeometry) return
+      for (const section of sections)
+        section.style.setProperty('--monitor-growth', '0px')
       const bottom =
         innerHeight -
         footer.getBoundingClientRect().height -
@@ -55,9 +57,12 @@ export function useMonitorFit() {
           section.querySelectorAll<HTMLElement>('.hardware-grid, #slots'),
         )
         const fits = () =>
-          section.getBoundingClientRect().top + section.scrollHeight <=
+          section.getBoundingClientRect().top +
+            window.scrollY +
+            section.scrollHeight <=
             bottom &&
           section.scrollWidth <= section.clientWidth + 1 &&
+          document.documentElement.scrollHeight <= innerHeight &&
           scrollAreas.every((el) => el.scrollHeight <= el.clientHeight + 1)
         setGrowth(0)
         if (fits()) {

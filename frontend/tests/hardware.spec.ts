@@ -50,6 +50,13 @@ test('Fit redistributes spare height into text, padding, and charts on live resi
   await page.setViewportSize({ width: 1920, height: 1400 })
   expect((await measure()).font).toBe(comfortable.font)
   expect((await measure()).padding).toBe(comfortable.padding)
+  await page.getByRole('button', { name: 'Fit', exact: true }).click()
+  await page.setViewportSize({ width: 1920, height: 650 })
+  await page.evaluate(() => window.scrollTo(0, 100))
+  await page.setViewportSize({ width: 1920, height: 900 })
+  await expect
+    .poll(async () => (await measure()).scroll)
+    .toBeLessThanOrEqual(900)
 })
 
 test('Fit reserves room for extra hardware instead of retaining the previous larger density', async ({
