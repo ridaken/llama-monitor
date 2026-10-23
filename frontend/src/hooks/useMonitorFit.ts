@@ -65,11 +65,15 @@ export function useMonitorFit() {
           document.documentElement.scrollHeight <= innerHeight &&
           scrollAreas.every((el) => el.scrollHeight <= el.clientHeight + 1)
         setGrowth(0)
-        if (fits()) {
-          let low = 0
-          let high = section.classList.contains('monitor-controls')
-            ? Math.min(64, telemetryGrowth + 8)
-            : 64
+        const compactFits = fits()
+        if (!compactFits) setGrowth(-4)
+        if (compactFits || fits()) {
+          let low = compactFits ? 0 : -4
+          let high = compactFits
+            ? section.classList.contains('monitor-controls')
+              ? Math.min(64, telemetryGrowth + 8)
+              : 64
+            : 0
           // Settle before paint. Controls may use a little more room, while
           // staying visually consistent with telemetry on multi-GPU dashboards.
           for (let step = 0; step < 8; step++) {
@@ -81,6 +85,10 @@ export function useMonitorFit() {
           setGrowth(low)
           if (section.classList.contains('monitor-telemetry'))
             telemetryGrowth = low
+        } else {
+          // Keep the readable base layout and natural scrolling when even the
+          // small compression allowance cannot fit the content in this window.
+          setGrowth(0)
         }
       }
       lastGeometry = geometry()
