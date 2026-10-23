@@ -17,6 +17,7 @@ import {
 import { clamp, fmt, fmtGB } from '@/lib/utils'
 import type { Stats, Timing } from '@/types'
 import type { useMonitor } from '@/hooks/useMonitor'
+import { useMonitorFit } from '@/hooks/useMonitorFit'
 
 type MonitorData = ReturnType<typeof useMonitor>
 const splitColors = [
@@ -235,6 +236,7 @@ export function Monitor({
   monitor: MonitorData
   launcher: LauncherController
 }) {
+  const fitRef = useMonitorFit()
   const { data: d, samples } = monitor
   const model = d?.model || {}
   const slots = d?.slots
@@ -265,7 +267,7 @@ export function Monitor({
     ) || []
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="monitor-layout">
+      <div ref={fitRef} className="monitor-layout">
         <div className="monitor-controls">
           <div className="surface subtle-grid monitor-feature monitor-hero relative overflow-hidden rounded-2xl p-6 sm:p-8">
             <div className="absolute -right-20 -top-28 size-64 rounded-full bg-primary/10 blur-3xl" />

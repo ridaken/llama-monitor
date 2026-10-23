@@ -1,6 +1,95 @@
 import { expect, test } from '@playwright/test'
 import { mockApi, stats } from './fixtures'
 
+test('Fit redistributes spare height into text, padding, and charts on live resize', async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.setViewportSize({ width: 1920, height: 900 })
+  await page.goto('/')
+  await expect(page.locator('.monitor-gpu')).toHaveCount(1)
+  const measure = () =>
+    page.evaluate(() => {
+      const card = document.querySelector('.monitor-gpu')!
+      const row = card.querySelector('.monitor-row > span')!
+      return {
+        font: parseFloat(getComputedStyle(row).fontSize),
+        padding: parseFloat(getComputedStyle(card).paddingTop),
+        chart: document
+          .querySelector('.monitor-decode .monitor-spark')!
+          .getBoundingClientRect().height,
+        bottom: document
+          .querySelector('.monitor-hardware')!
+          .getBoundingClientRect().bottom,
+        scroll: document.documentElement.scrollHeight,
+      }
+    })
+  const compact = await measure()
+  await page.setViewportSize({ width: 1920, height: 1200 })
+  await expect
+    .poll(async () => (await measure()).font)
+    .toBeGreaterThan(compact.font + 0.5)
+  const roomy = await measure()
+  expect(roomy.padding).toBeGreaterThan(compact.padding + 1)
+  expect(roomy.chart).toBeGreaterThan(compact.chart + 5)
+  expect(roomy.bottom).toBeGreaterThan(1080)
+  expect(roomy.scroll).toBeLessThanOrEqual(1200)
+  if (process.env.CAPTURE_UI === '1')
+    await page.screenshot({
+      path: 'test-results/monitor-adaptive-fit.png',
+      fullPage: true,
+    })
+  await page.setViewportSize({ width: 1920, height: 900 })
+  await expect
+    .poll(async () => (await measure()).scroll)
+    .toBeLessThanOrEqual(900)
+  expect((await measure()).font).toBeCloseTo(compact.font, 1)
+  await page.getByRole('button', { name: 'Comfortable', exact: true }).click()
+  await page.setViewportSize({ width: 1920, height: 1200 })
+  const comfortable = await measure()
+  await page.setViewportSize({ width: 1920, height: 1400 })
+  expect((await measure()).font).toBe(comfortable.font)
+  expect((await measure()).padding).toBe(comfortable.padding)
+})
+
+test('Fit reserves room for extra hardware instead of retaining the previous larger density', async ({
+  page,
+}) => {
+  let gpuCount = 1
+  await mockApi(page, {
+    'GET /api/stats': () => ({
+      ...stats,
+      gpu: {
+        ...stats.gpu,
+        devices: Array.from({ length: gpuCount }, (_, index) => ({
+          ...stats.gpu.devices[0],
+          index,
+        })),
+      },
+    }),
+  })
+  await page.setViewportSize({ width: 1920, height: 1200 })
+  await page.goto('/')
+  await expect(page.locator('.monitor-gpu')).toHaveCount(1)
+  const font = () =>
+    page
+      .locator('.monitor-gpu .monitor-row > span')
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
+  const singleGpuFont = await font()
+  gpuCount = 3
+  await expect(page.locator('.monitor-gpu')).toHaveCount(3)
+  await expect.poll(font).toBeLessThan(singleGpuFont)
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollHeight))
+    .toBeLessThanOrEqual(1200)
+  await page.getByRole('link', { name: 'Manage', exact: true }).click()
+  await page.getByRole('link', { name: 'Monitor', exact: true }).click()
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollHeight))
+    .toBeLessThanOrEqual(1200)
+})
+
 test('Fit Hardware hugs its cards on a tall three-GPU dashboard', async ({
   page,
 }) => {

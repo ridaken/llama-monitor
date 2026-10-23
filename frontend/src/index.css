@@ -471,88 +471,105 @@ button:disabled {
     padding-left: 8px;
   }
 }
-@media (min-width: 2200px) and (min-height: 1300px) {
+/* A measured budget grows content in desktop Fit, while keeping natural flow
+   for mobile, Comfortable, and windows already filled by their contents. */
+@media (min-width: 1280px) {
   .app-fit .monitor-layout {
-    gap: 18px;
+    --monitor-growth: 0px;
+    gap: calc(10px + var(--monitor-growth) * 0.3);
   }
   .app-fit .monitor-controls,
   .app-fit .monitor-telemetry {
-    gap: 18px;
-  }
-  .app-fit .monitor-feature {
-    padding: 26px;
+    --monitor-text: calc(12px + var(--monitor-growth) * 0.15);
+    gap: calc(10px + var(--monitor-growth) * 0.3);
   }
   .app-fit .monitor-panel-header {
-    padding: 24px 24px 12px;
+    padding: calc(12px + var(--monitor-growth) * 0.7)
+      calc(16px + var(--monitor-growth)) calc(4px + var(--monitor-growth) * 0.3);
   }
   .app-fit .monitor-panel-content {
-    padding: 0 24px 24px;
-  }
-  .app-fit .configuration-header {
-    padding: 24px 24px 16px;
-  }
-  .app-fit .configuration-content {
-    padding: 0 24px 24px;
-    --configuration-gap: 20px;
+    padding: 0 calc(16px + var(--monitor-growth))
+      calc(12px + var(--monitor-growth) * 0.8);
   }
   .app-fit .monitor-row {
-    padding: 10px 0;
+    padding: calc(4px + var(--monitor-growth) * 0.3) 0;
   }
-  .app-fit .monitor-row > span {
-    font-size: 15px;
+  .app-fit .monitor-throughput .monitor-row {
+    padding: calc(1px + var(--monitor-growth) * 0.3) 0;
   }
-  .app-fit .monitor-slot,
-  .app-fit .monitor-gpu {
-    padding: 18px;
+  .app-fit .monitor-hardware .monitor-row {
+    padding: calc(3px + var(--monitor-growth) * 0.25) 0;
   }
-  .app-fit .launch-controls button,
-  .app-fit .configuration-content input,
-  .app-fit .configuration-content [role='combobox'],
-  .app-fit .configuration-content button:not([role='checkbox']) {
-    height: 38px;
-    font-size: 14px;
+  .app-fit .monitor-panel .text-xs,
+  .app-fit .monitor-feature .text-xs,
+  .app-fit .configuration-content .text-xs {
+    font-size: var(--monitor-text);
   }
-  .app-fit .configuration-content label,
-  .app-fit .configuration-prompts strong,
-  .app-fit .monitor-gpu strong {
-    font-size: 14px;
-  }
-  .app-fit .monitor-telemetry {
-    max-height: calc(100dvh - 320px);
-    grid-template-rows:
-      minmax(210px, max-content) minmax(220px, max-content)
-      minmax(0, max-content);
-  }
-  .app-fit #slots {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .app-fit .monitor-spark {
-    height: clamp(50px, 5vh, 110px);
-  }
-}
-@media (min-width: 2200px) and (min-height: 1700px) {
   .app-fit .monitor-panel-header .text-sm,
   .app-fit .monitor-row > span,
-  .app-fit .monitor-slot strong,
-  .app-fit .monitor-gpu strong {
-    font-size: 1rem;
+  .app-fit .monitor-hardware .monitor-row > span,
+  .app-fit .monitor-gpu strong,
+  .app-fit .monitor-slot strong {
+    font-size: calc(12.5px + var(--monitor-growth) * 0.15);
   }
-  .app-fit .monitor-feature .text-xs,
-  .app-fit .monitor-panel .text-xs,
-  .app-fit .configuration-content .text-xs,
-  .app-fit .configuration-content label,
-  .app-fit .configuration-prompts strong,
+  .app-fit .monitor-panel .text-sm:not(.monitor-row > span) {
+    font-size: calc(14px + var(--monitor-growth) * 0.12);
+  }
+  .app-fit .monitor-hardware .monitor-gpu,
+  .app-fit .monitor-hardware .monitor-cpu,
+  .app-fit .monitor-placement,
+  .app-fit .monitor-slot {
+    padding: calc(8px + var(--monitor-growth) * 0.7);
+  }
+  .app-fit .monitor-spark,
+  .app-fit .monitor-hardware .monitor-spark {
+    height: calc(18px + var(--monitor-growth));
+  }
+  .app-fit .monitor-decode .monitor-spark {
+    height: calc(18px + var(--monitor-growth) * 2);
+  }
+  .app-fit .monitor-decode {
+    padding: calc(12px + var(--monitor-growth) * 0.8)
+      calc(18px + var(--monitor-growth));
+  }
+  .app-fit .monitor-decode .metric {
+    font-size: calc(2.4rem + var(--monitor-growth) * 0.6);
+  }
+  .app-fit .monitor-cpu .metric {
+    font-size: calc(1.5rem + var(--monitor-growth) * 0.3);
+  }
+  .app-fit .monitor-feature {
+    padding: calc(16px + var(--monitor-growth) * 0.8)
+      calc(18px + var(--monitor-growth));
+  }
+  .app-fit .monitor-hero h2 {
+    font-size: clamp(1.5rem, calc(1.8vw + var(--monitor-growth) * 0.4), 3.5rem);
+  }
+  .app-fit .configuration-header {
+    padding: calc(12px + var(--monitor-growth) * 0.6)
+      calc(18px + var(--monitor-growth))
+      calc(10px + var(--monitor-growth) * 0.4);
+  }
+  .app-fit .configuration-content {
+    padding: 0 calc(18px + var(--monitor-growth))
+      calc(12px + var(--monitor-growth) * 0.8);
+    --configuration-gap: calc(8px + var(--monitor-growth) * 0.4);
+  }
   .app-fit .configuration-content input,
   .app-fit .configuration-content [role='combobox'],
   .app-fit .configuration-content button:not([role='checkbox']),
   .app-fit .launch-controls button {
-    font-size: 0.85rem;
+    height: calc(32px + var(--monitor-growth) * 0.35);
+    font-size: var(--monitor-text);
   }
-  .app-fit .monitor-panel .text-sm {
-    font-size: 0.95rem;
+  .app-fit .configuration-content label,
+  .app-fit .configuration-prompts strong {
+    font-size: var(--monitor-text);
   }
-  .app-fit .monitor-decode .metric {
-    font-size: 4rem;
+  .app-fit .configuration-model {
+    grid-template-columns: minmax(0, 1fr) calc(
+        76px + var(--monitor-growth) * 1.2
+      );
   }
 }
 /* Shared density is selected at the app shell; page layouts stay responsive. */

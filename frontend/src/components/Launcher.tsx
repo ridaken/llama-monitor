@@ -315,7 +315,7 @@ export function ConfigurationPanel({
             Delete
           </Button>
         </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_76px] gap-3">
+        <div className="configuration-model grid grid-cols-[minmax(0,1fr)_76px] gap-3">
           <div className="space-y-2">
             <Label htmlFor="lx-model">Model (.gguf)</Label>
             <div className="flex gap-2">
