@@ -5,7 +5,115 @@ import {
   launcherState,
   mockApi,
   startupState,
+  stats,
 } from './fixtures'
+
+test('compact chrome keeps page titles accessible and status readable across views', async ({
+  page,
+}) => {
+  await mockApi(page)
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const [view, title] of [
+      ['monitor', 'Live monitor'],
+      ['manage', 'Server management'],
+      ['history', 'Activity history'],
+    ]) {
+      await page.goto(`/#${view}`)
+      await expect(page.locator('header #updated')).toContainText('active')
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(title)
+      await expect(page.getByText('Workspace', { exact: true })).toHaveCount(0)
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await expect(page.locator('header #updated')).toBeInViewport({ ratio: 1 })
+      const geometry = await page.evaluate(() => {
+        const header = document.querySelector('header')!.getBoundingClientRect()
+        const nav = document.querySelector('nav')!.getBoundingClientRect()
+        const status = document.querySelector('#updated')!
+        const rect = status.getBoundingClientRect()
+        const title = document.querySelector('main h1')!.getBoundingClientRect()
+        return {
+          gap: nav.top - header.bottom,
+          statusFits:
+            rect.left >= 0 &&
+            rect.right <= innerWidth &&
+            rect.bottom <= header.bottom &&
+            status.scrollWidth <= status.clientWidth + 1,
+          titleHeight: title.height,
+          pageWidth: document.documentElement.scrollWidth,
+        }
+      })
+      expect(geometry.gap).toBeCloseTo(0, 0)
+      expect(geometry.statusFits).toBe(true)
+      expect(geometry.titleHeight).toBe(1)
+      expect(geometry.pageWidth).toBeLessThanOrEqual(width + 1)
+      if (process.env.CAPTURE_UI === '1')
+        await page.screenshot({
+          path: `test-results/compact-${view}-${width}.png`,
+          fullPage: true,
+        })
+    }
+  }
+})
+
+test('top bar preserves waiting, timestamp, active, idle and unreachable states', async ({
+  page,
+}) => {
+  let current = { ...stats }
+  await mockApi(page, { 'GET /api/stats': () => current })
+  let release!: () => void
+  const ready = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route('**/api/stats*', async (route) => {
+    await ready
+    await route.fallback()
+  })
+  await page.goto('/')
+  const updated = page.locator('header #updated')
+  try {
+    await expect(updated).toHaveText('Waiting for data')
+    await expect(page.locator('#status')).toHaveText('Connecting…')
+  } finally {
+    release()
+  }
+  await expect(updated).toHaveText(/\d+:\d+:\d+.* · active/)
+  const first = await updated.textContent()
+  await expect.poll(() => updated.textContent()).not.toBe(first)
+  current = { ...stats, active: false, log_mode: false }
+  await expect(updated).toContainText('idle (http)')
+  current = { ...current, log_mode: true }
+  await expect(updated).toContainText('idle (log)')
+  current = { ...current, online: false }
+  await expect(page.locator('#status')).toContainText('unreachable')
+  await expect(updated).toContainText('idle (log)')
+})
+
+test('Fit reallocates tile space when the top bar changes height', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockApi(page)
+  await page.goto('/')
+  await expect(page.locator('#s-model')).toContainText('Qwen test')
+  const hardware = page.locator('.monitor-hardware')
+  const tileHeight = () =>
+    hardware.evaluate((el) => el.getBoundingClientRect().height)
+  const initialHeight = await tileHeight()
+  // Simulate extra header rows without a viewport resize or telemetry update.
+  await page.evaluate(() => {
+    const row = document.createElement('div')
+    row.id = 'extra-header-row'
+    row.style.height = '80px'
+    document.querySelector('header')!.append(row)
+  })
+  await expect.poll(tileHeight).toBeLessThan(initialHeight)
+  const reducedHeight = await tileHeight()
+  await page.locator('#extra-header-row').evaluate((el) => el.remove())
+  await expect.poll(tileHeight).toBeGreaterThan(reducedHeight)
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollHeight))
+    .toBeLessThanOrEqual(900)
+})
 
 test('layout is shared across views, preserves drafts and remembers the existing preference', async ({
   page,

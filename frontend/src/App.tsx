@@ -109,7 +109,7 @@ export default function App() {
               </span>
             </span>
           </a>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
+          <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-2">
             <Badge
               id="status"
               variant="outline"
@@ -127,41 +127,21 @@ export default function App() {
             >
               {data?.model?.name || ''}
             </span>
+            <div
+              id="updated"
+              className="flex min-w-0 max-w-full items-center gap-2 text-xs text-muted-foreground"
+            >
+              <Clock3 className="size-4 shrink-0" />
+              <span>
+                {monitor.updatedAt
+                  ? `${monitor.updatedAt.toLocaleTimeString()} · ${active ? 'active' : `idle (${data?.log_mode ? 'log' : 'http'})`}`
+                  : 'Waiting for data'}
+              </span>
+            </div>
           </div>
         </div>
       </header>
       <div className="app-body mx-auto w-full px-4 pb-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-2 border-b border-border/60 py-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.2em] text-primary">
-              <span className="size-1.5 rounded-full bg-primary" />
-              Workspace
-            </div>
-            <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-              {view === 'monitor'
-                ? 'Live monitor'
-                : view === 'manage'
-                  ? 'Server management'
-                  : 'Activity history'}
-            </h1>
-            <p className="mt-0.5 text-xs text-muted-foreground sm:text-sm">
-              {view === 'monitor'
-                ? 'A clear view of what your model and hardware are doing now.'
-                : view === 'manage'
-                  ? 'Executable, Gaming integration, and Windows startup settings.'
-                  : 'Find past generations and inspect saved prompts.'}
-            </p>
-          </div>
-          <div
-            id="updated"
-            className="flex items-center gap-2 text-xs text-muted-foreground"
-          >
-            <Clock3 className="size-4" />
-            {monitor.updatedAt
-              ? `${monitor.updatedAt.toLocaleTimeString()} · ${active ? 'active' : `idle (${data?.log_mode ? 'log' : 'http'})`}`
-              : 'Waiting for data'}
-          </div>
-        </div>
         <nav
           aria-label="Main navigation"
           className="mb-2 flex flex-wrap items-center gap-2 border-b border-border/60 py-1"
@@ -219,6 +199,13 @@ export default function App() {
           </div>
         </nav>
         <main className="app-main">
+          <h1 className="sr-only">
+            {view === 'monitor'
+              ? 'Live monitor'
+              : view === 'manage'
+                ? 'Server management'
+                : 'Activity history'}
+          </h1>
           <div className="monitor-view" hidden={view !== 'monitor'}>
             <Monitor monitor={monitor} launcher={launcher} />
           </div>

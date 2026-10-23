@@ -150,7 +150,7 @@ export function History({ active }: { active: boolean }) {
     // Observe chrome and filters, not the records whose height we set.
     document
       .querySelectorAll(
-        '.app-shell > header, .app-body > div, .app-body > nav, .app-body > footer, .history-summary, .history-filters',
+        '.app-shell > header, .app-body > nav, .app-body > footer, .history-summary, .history-filters',
       )
       .forEach((element) => observer.observe(element))
     if (paginationRef.current) observer.observe(paginationRef.current)
