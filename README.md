@@ -153,6 +153,7 @@ uses the same controls as the dashboard; no host Python installation is needed:
 
 ```sh
 docker compose exec -T monitor python cli.py status --json
+docker compose exec -T monitor python cli.py doctor --json
 docker compose exec -T monitor python cli.py configs list --json
 docker compose exec -T monitor python cli.py launch --config "My model" --wait --timeout 300 --json
 docker compose exec -T monitor python cli.py smoke --timeout 60 --json
@@ -173,7 +174,8 @@ Additional commands are `configs show NAME`, `restart [--wait]`, `wait --backend
 `wait --ready`, `gaming status`, and `startup status`. History supports `--model`,
 `--state`, `--from-ts`, `--to-ts`, `--sort`, `--order`, `--limit`, and `--cursor`;
 pass the returned `next_cursor` to fetch another page. `logs` returns a snapshot
-of complete lines from the API's bounded initial log window, rather than following
+of complete lines from the API's bounded initial log window (including a final
+unterminated line after an early crash), rather than following
 the log indefinitely. See `python cli.py --help` and each command's `--help`.
 Managed history uses the launch alias (or model filename) immediately, so filtering
 by model works after launch/restart even when no dashboard or stats request runs.
@@ -202,12 +204,56 @@ Exit codes are **0** success, **1** operation/verification failure, **2** invali
 arguments or configuration input, **3** connection/protocol failure, **4** timeout,
 and **130** interruption. `--help` prints ordinary help text. Without `--json`,
 results are formatted JSON (plain console text for logs), and errors go to stderr.
+`doctor` also includes its full report in `data` on failure (exit 1), and prints
+that report to stdout in text mode so the evidence remains available.
 
 Requests default to 10 seconds (`--request-timeout`), waits to 300 seconds
 (`--timeout`), and smoke to 60 seconds (`--timeout`, maximum 300). Waits use a
 deadline and fail on a changed model run. Only backend-availability waits retry
 connection errors; no mutation or inference request is automatically retried.
 A timed-out submitted operation may still complete; inspect state before retrying.
+
+### Model startup troubleshooting
+
+The **Run diagnostics** button and `python cli.py doctor --json` run the same
+read-only checks on the backend: `llama-server --list-devices` and, when installed,
+`nvidia-smi`. Each subprocess has a four-second timeout and returns at most the
+last 16 KiB of output. The dashboard runs these checks once when it observes a
+server exit, and allows an explicit retry. They never load a model, change
+settings, stop a server, or restart Docker. A passing report does not prove model
+compatibility or inference; unavailable NVIDIA tools are reported as skipped.
+The report is also available at `GET /api/launcher/doctor` (HTTP 200 even when
+checks fail; inspect `healthy` and `checks`).
+
+The launcher now captures stdout/stderr in `llama-server.log.startup` next to the
+managed log. The file is reset on each launch and survives a backend restart.
+Console and CLI logs use it when the managed log is empty, preserving errors
+from failures before llama-server opens `--log-file`. Once that file has content,
+Console uses it without duplicating stderr into history. Keep the startup file
+for additional process output if the managed log has already opened.
+
+On Linux, exit `-11` means the process received SIGSEGV; it does **not** identify
+the underlying cause. In a real Windows Docker/WSL failure, even `--list-devices`
+segfaulted and NVIDIA diagnostics failed while Windows still saw the GPUs.
+A full Docker/WSL restart restored access without changing the model. If the
+diagnostics show the same NVIDIA access failure, save work in **all containers
+and WSL sessions** before running this from PowerShell on the Windows host:
+
+```powershell
+docker desktop stop
+wsl --shutdown
+docker desktop start
+docker compose up -d --wait monitor
+docker compose exec -T monitor python cli.py doctor --json
+```
+
+This interrupts other Docker containers and every running WSL distribution.
+The app never performs it automatically. Inspect recovery of your other services,
+then launch your saved model again. An ordinary Docker restart did not restore
+GPU access in that incident; stopping WSL as well was necessary. Keep WSL,
+Docker Desktop, and the Windows NVIDIA driver current. See
+[Docker's WSL guidance](https://docs.docker.com/desktop/features/wsl/best-practices/)
+and [GPU prerequisites](https://docs.docker.com/desktop/features/gpu/).
 
 ### Isolated development tests
 

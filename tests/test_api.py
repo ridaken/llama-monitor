@@ -87,6 +87,29 @@ def test_console_decodes_jsonl_and_resumes_at_byte_offset(client):
     assert second["content"] == "request done\n"
 
 
+@pytest.mark.parametrize("text", ["CUDA initialization failed", "startup\nCUDA initialization failed"])
+def test_console_falls_back_to_early_output_and_switches_source(client, text):
+    with open(launcher.startup_log_path(), "w", encoding="utf-8") as output:
+        output.write(text)
+    first = client.get("/api/launcher/console").json()
+    assert first["content"] == text
+    assert first["source"] == "startup"
+    # Offset belongs to a different file; don't skip the new structured log.
+    with open(store.MANAGED_LOG, "w", encoding="utf-8") as output:
+        output.write("managed model log with a longer first line\n")
+    second = client.get("/api/launcher/console", params={"offset": first["offset"], "source": first["source"]}).json()
+    assert second["source"] == "managed" and second["content"].startswith("managed model")
+    third = client.get("/api/launcher/console", params={"offset": second["offset"], "source": second["source"]}).json()
+    assert third["content"] == ""
+
+
+def test_doctor_api_is_read_only_and_returns_report(client, monkeypatch):
+    report = {"healthy": False, "summary": "GPU check failed", "checks": [], "recovery": []}
+    monkeypatch.setattr(app_module, "doctor", lambda: report)
+    assert client.get("/api/launcher/doctor").json() == report
+    assert client.get("/api/launcher/state").json()["status"]["state"] == "stopped"
+
+
 def test_no_log_uses_http_idle_fallback(client, monkeypatch):
     levels = []
     def fake_collect(self, level="full"):

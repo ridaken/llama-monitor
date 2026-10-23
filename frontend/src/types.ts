@@ -48,6 +48,18 @@ export type Config = {
   log_prompts: boolean
   flags: Flag[]
 }
+export type DoctorReport = {
+  healthy: boolean
+  summary: string
+  checks: Array<{
+    name: string
+    state: 'pass' | 'fail' | 'skipped'
+    message: string
+    output: string
+    truncated?: boolean
+  }>
+  recovery: string[]
+}
 export type LauncherState = {
   runtime?: RuntimeInfo
   settings: {
@@ -63,6 +75,7 @@ export type LauncherState = {
     config_name?: string | null
     config?: Config | null
     exit_code?: number
+    started_at?: number | null
     adopted?: boolean
   }
   managed_log: string

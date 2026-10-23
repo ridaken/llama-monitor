@@ -45,7 +45,7 @@ def parser():
     common.add_argument("--request-timeout", type=positive, default=argparse.SUPPRESS)
     root = Parser(description=__doc__, parents=[common])
     commands = root.add_subparsers(dest="command", required=True, parser_class=Parser)
-    for name in ("status", "stop", "stats"):
+    for name in ("status", "stop", "stats", "doctor"):
         commands.add_parser(name, parents=[common])
     for name in ("launch", "restart"):
         command = commands.add_parser(name, parents=[common])
@@ -154,6 +154,8 @@ def configs(client, name=None):
 
 def execute(args, client):
     command = args.command
+    if command == "doctor":
+        return client.request("GET", "/api/launcher/doctor")
     if command == "status":
         health = client.request("GET", "/api/health")
         if health.get("status") != "ok":
@@ -228,6 +230,9 @@ def main(argv=None):
         finally:
             client.http.close()
         result, code = {"ok": True, "data": data}, 0
+        if args.command == "doctor" and not data["healthy"]:
+            code = 1
+            result.update(ok=False, error={"message": data["summary"], "code": code})
     except CLIError as exc:
         code = exc.code
         result = {"ok": False, "error": {"message": str(exc), "code": code}}
@@ -240,7 +245,10 @@ def main(argv=None):
     if json_output:
         print(json.dumps(result, ensure_ascii=True))
     elif code:
-        print(result["error"]["message"], file=sys.stderr)
+        if "data" in result:
+            print(json.dumps(result["data"], indent=2, ensure_ascii=True))
+        else:
+            print(result["error"]["message"], file=sys.stderr)
     elif isinstance(data, dict) and args.command == "logs":
         print(data["content"])
     else:

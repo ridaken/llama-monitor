@@ -40,7 +40,8 @@ from collectors import (
     find_llama_pids,
 )
 from history import HistoryDB, LogFollower, decode_log_line
-from launcher import LaunchError, ServerManager, configured_model_name, resolve_binary
+from launcher import LaunchError, ServerManager, configured_model_name, resolve_binary, startup_log_path
+from diagnostics import doctor
 from gaming import GamingCoordinator
 from apollo import ApolloClient, certificate_fingerprint, parse_url, protect, unprotect
 from apollo_setup import commands as hook_commands, write_hook_config
@@ -191,6 +192,10 @@ def build_app(args) -> FastAPI:
     @app.get("/api/launcher/readiness")
     def readiness():
         return verification.readiness()
+
+    @app.get("/api/launcher/doctor")
+    def get_doctor():
+        return doctor()
 
     @app.post("/api/launcher/smoke")
     async def smoke(body: SmokeRequest):
@@ -540,7 +545,7 @@ def build_app(args) -> FastAPI:
     CONSOLE_HEAD = 256 * 1024
 
     @app.get("/api/launcher/console")
-    def get_console(offset: int = 0) -> JSONResponse:
+    def get_console(offset: int = 0, source: str = "") -> JSONResponse:
         """Stream the active server log (console output) incrementally.
 
         Reads the currently-monitored log (the managed log for launched servers,
@@ -548,6 +553,14 @@ def build_app(args) -> FastAPI:
         truncation handling so a restart/rotation re-reads from the top.
         """
         path = rt["log_path"] or store.MANAGED_LOG
+        selected_source = "managed" if path == store.MANAGED_LOG else "external"
+        # Keep structured logs/history free of duplicate stderr output. Only
+        # fall back to process output when the managed log has no bytes yet.
+        if selected_source == "managed" and os.path.isfile(startup_log_path()):
+            if not os.path.isfile(path) or os.path.getsize(path) == 0:
+                path, selected_source = startup_log_path(), "startup"
+        if source and source != selected_source:
+            offset = 0
         if not path or not os.path.isfile(path):
             return JSONResponse({"available": False, "content": "", "offset": 0, "size": 0, "path": path})
         try:
@@ -564,7 +577,11 @@ def build_app(args) -> FastAPI:
                 first_complete = f.tell()
                 raw = f.read()
                 end = raw.rfind(b"\n")
-                if end < 0:
+                # A crashing loader may never terminate its final line, even
+                # after writing other complete lines. Include all remaining bytes.
+                if selected_source == "startup" and manager.status()["state"] != "running":
+                    new_offset = first_complete + len(raw)
+                elif end < 0:
                     raw = b""
                     new_offset = first_complete
                 else:
@@ -579,7 +596,7 @@ def build_app(args) -> FastAPI:
             return JSONResponse({"available": False, "error": str(e), "content": "",
                                  "offset": offset, "size": 0, "path": path})
         return JSONResponse({"available": True, "content": content,
-                             "offset": new_offset, "size": size, "path": path})
+                             "offset": new_offset, "size": size, "path": path, "source": selected_source})
 
     @app.post("/api/launcher/settings")
     async def post_settings(request: Request) -> JSONResponse:

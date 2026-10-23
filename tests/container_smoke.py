@@ -81,6 +81,10 @@ def main():
             run("up", "--build", "--wait", "--wait-timeout", "120", "-d")
             assert request("/api/health") == {"status": "ok"}
             cli("wait", "--backend", "--timeout", "10")
+            report = cli("doctor")
+            assert report["healthy"] and report["checks"][0]["state"] == "pass"
+            if args.gpu:
+                assert report["checks"][1]["state"] == "pass"
             assert cli("status")["readiness"]["state"] == "stopped"
             cli("wait", "--ready", expected=1)
             cli("smoke", expected=1)
@@ -132,6 +136,16 @@ def main():
             run("up", "--wait", "--wait-timeout", "60", "-d")
             assert exec_python("from pathlib import Path; print(Path('/data/smoke-stopped').read_text())") == "graceful"
             assert cli("status")["launcher"]["status"]["state"] == "stopped"
+            # A loader may fail before --log-file is initialized, without even
+            # a trailing newline. Both the console and doctor must retain it.
+            exec_python("from pathlib import Path; p=Path('/tmp/llama-server-crash'); "
+                        "p.write_text('#!/opt/venv/bin/python\\nimport sys\\nsys.stderr.write(\"early loader fault\")\\nsys.exit(7)\\n'); p.chmod(0o755)")
+            request("/api/launcher/settings", {"llama_server_path": "/tmp/llama-server-crash"})
+            cli("launch", "--config", "smoke")
+            eventually(lambda: cli("status")["launcher"]["status"]["state"] == "exited")
+            assert cli("logs")["content"] == "early loader fault"
+            cli("doctor", expected=1)
+            cli("wait", "--ready", expected=1)
             request("/api/launcher/settings", {"llama_server_path": bundled})
             run("up", "--force-recreate", "--wait", "--wait-timeout", "60", "-d")
             assert request("/api/launcher/state")["binary_valid"]
