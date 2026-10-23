@@ -67,6 +67,61 @@ def test_text_and_jsonl_partial_and_malformed(tmp_path):
     assert jf.snapshot()["split"]["CUDA0"] == 100
 
 
+@pytest.mark.parametrize("structured", [False, True])
+def test_memory_fit_across_polls_and_monitor_restart(tmp_path, structured):
+    path, db, follower = make(tmp_path)
+
+    def append(message):
+        with path.open("a", encoding="utf-8") as output:
+            output.write((json.dumps({"type": "log", "msg": message})
+                          if structured else message) + "\n")
+
+    append("common_init_result: fitting params to device memory")
+    append("load_tensors: CUDA0 model buffer size = 26000.00 MiB")
+    follower.poll()
+    assert follower.snapshot()["split"] == {}
+    follower = LogFollower(db, str(path), run_id="managed-run", managed=True)
+    append("llama_kv_cache: CUDA0 KV buffer size = 4000.00 MiB")
+    follower.poll()
+    assert follower.snapshot()["split"] == {}
+    append("llama_params_fit: fitting params to free memory took 1.00 seconds")
+    append("load_tensors: CUDA0 model buffer size = 8000.00 MiB")
+    append("llama_kv_cache: CUDA0 KV buffer size = 300.00 MiB")
+    append("load_tensors: CPU_Mapped model buffer size = 1000.00 MiB")
+    follower.poll()
+    assert follower.snapshot()["split"] == {"CUDA0": 8300.0, "CPU": 1000.0}
+    restarted = LogFollower(db, str(path), run_id="managed-run", managed=True)
+    assert restarted.snapshot()["split"] == follower.snapshot()["split"]
+    # A new server banner must also end an interrupted fit pass.
+    append("common_init_result: fitting params to device memory")
+    append("build: fresh server")
+    append("load_tensors: CUDA1 model buffer size = 2000.00 MiB")
+    restarted.poll()
+    assert restarted.snapshot()["split"] == {"CUDA1": 2000.0}
+
+
+def test_memory_fit_state_rolls_back_with_failed_database_write(tmp_path, monkeypatch):
+    path, db, follower = make(tmp_path)
+    path.write_text("common_init_result: fitting params to device memory\n", encoding="utf-8")
+    follower.poll()
+    with path.open("a", encoding="utf-8") as output:
+        output.write("llama_params_fit: fitting params to free memory took 1 second\n"
+                     "load_tensors: CUDA0 model buffer size = 8000.00 MiB\n")
+    save = db.save_batch
+
+    def fail_save(*args, **kwargs):
+        raise RuntimeError("write failed")
+
+    monkeypatch.setattr(db, "save_batch", fail_save)
+    with pytest.raises(RuntimeError, match="write failed"):
+        follower.poll()
+    assert follower.snapshot()["split"] == {}
+    assert follower.memory.fitting
+    monkeypatch.setattr(db, "save_batch", save)
+    follower.poll()
+    assert follower.snapshot()["split"] == {"CUDA0": 8000.0}
+
+
 def test_concurrent_slots_and_run_reuse(tmp_path):
     path, db, follower = make(tmp_path)
     with path.open("a", encoding="utf-8") as f:

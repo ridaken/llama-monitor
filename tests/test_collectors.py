@@ -81,6 +81,25 @@ def test_parse_device_split_missing_file_is_empty():
     assert parse_device_split("/no/such/file.log") == {}
 
 
+@pytest.mark.parametrize("prefix", ["llama_params_fit", "common_fit_params"])
+def test_device_split_excludes_fit_trials_but_keeps_real_draft_buffers(tmp_path, prefix):
+    log = tmp_path / "llama.log"
+    log.write_text(
+        "common_init_result: fitting params to device memory\n"
+        "load_tensors: CUDA0 model buffer size = 16000.00 MiB\n"
+        "llama_kv_cache: CUDA0 KV buffer size = 4000.00 MiB\n"
+        "load_tensors: CUDA0 model buffer size = 8000.00 MiB\n"
+        f"{prefix}: fitting params to free memory took 0.25 seconds\n"
+        "load_tensors: CUDA0 model buffer size = 7000.00 MiB\n"
+        "llama_kv_cache: CUDA0 KV buffer size = 300.00 MiB\n"
+        "sched_reserve: CUDA0 compute buffer size = 200.00 MiB\n"
+        "load_tensors: CUDA0 model buffer size = 1000.00 MiB\n"
+        "llama_kv_cache: CUDA0 KV buffer size = 50.00 MiB\n",
+        encoding="utf-8",
+    )
+    assert parse_device_split(str(log)) == {"CUDA0": 8550.0}
+
+
 def test_parse_device_baseline_reads_free_memory(tmp_path):
     log = tmp_path / "llama.log"
     log.write_text(

@@ -94,7 +94,9 @@ test('monitor presents every telemetry group and status', async ({ page }) => {
   await expect(page.locator('#t-pp')).toContainText('120.2')
   await expect(page.locator('#t-spec')).toContainText('2.40 tok/step')
   await expect(page.locator('#lr-total')).toContainText('0.80s')
-  await expect(page.locator('#split-legend')).toContainText('CUDA0')
+  await expect(page.locator('.monitor-gpu .model-memory')).toContainText(
+    '10.0 GB',
+  )
   await expect(page.locator('#slots')).toContainText('Slot 0')
   await expect(page.locator('#gpus')).toContainText('Test GPU')
   await expect(page.locator('#sysmem')).toContainText('llama-server')

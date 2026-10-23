@@ -161,7 +161,7 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
     'aria-pressed',
     'true',
   )
-  await expect(page.locator('.monitor-panel')).toHaveCount(5)
+  await expect(page.locator('.monitor-panel')).toHaveCount(4)
   const panelBottom = await page
     .locator('.monitor-panel')
     .evaluateAll((panels) =>

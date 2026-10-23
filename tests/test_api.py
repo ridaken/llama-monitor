@@ -36,6 +36,42 @@ def test_launcher_state_shape(client):
     assert body["status"]["state"] == "stopped"
 
 
+@pytest.mark.parametrize("process_bytes", [None, 1024])
+def test_memory_stats_map_log_identity_and_nvml_ordinal(monkeypatch, tmp_path, process_bytes):
+    monkeypatch.setattr(store, "HOME_DIR", str(tmp_path))
+    monkeypatch.setattr(store, "STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setattr(store, "MANAGED_LOG", str(tmp_path / "managed.log"))
+    monkeypatch.setattr(store.shutil, "which", lambda name: None)
+    monkeypatch.setattr(app_module.runtime, "containerized", lambda: False)
+    monkeypatch.setattr(app_module.GpuCollector, "collect", lambda *args: {"ok": True, "devices": [
+        {"index": 7, "pci_bus_id": "00000000:01:00.0", "llama_mem": process_bytes}]})
+    monkeypatch.setattr(app_module.LlamaCollector, "collect", lambda *args: {"online": True})
+    log = tmp_path / "server.log"
+    log.write_text("llama_model_load: using device CUDA0 (GPU A) (0000:01:00.0) - 1024 MiB free\n"
+                   "load_tensors: CUDA0 model buffer size = 100.00 MiB\n"
+                   "load_tensors: CUDA1 model buffer size = 50.00 MiB\n", encoding="utf-8")
+    args = argparse.Namespace(llama_url="http://127.0.0.1:9", llama_log=str(log), port=8500, host="127.0.0.1")
+    with TestClient(app_module.build_app(args)) as client:
+        result = client.get("/api/stats").json()
+    if process_bytes is not None:
+        assert result["split_source"] == "nvml"
+        assert result["split"] == [{"label": "CUDA7", "bytes": 1024, "kind": "gpu", "gpu_index": 7}]
+    else:
+        assert result["split_source"] == "log"
+        assert result["split"] == [
+            {"label": "CUDA0", "bytes": 100 * 1024**2, "kind": "gpu", "gpu_index": 7},
+            {"label": "CUDA1", "bytes": 50 * 1024**2, "kind": "gpu"}]
+
+
+def test_memory_delta_requires_identity_and_honors_reordered_devices():
+    baseline = {"CUDA0": 900, "CUDA1": 500}
+    gpu = {"devices": [{"index": 7, "mem_total": 1000 * app_module.MIB, "mem_used": 300 * app_module.MIB},
+                       {"index": 0, "mem_total": 2000 * app_module.MIB, "mem_used": 1500 * app_module.MIB}]}
+    assert app_module._delta_split(baseline, gpu, {}) == []
+    assert app_module._delta_split(baseline, gpu, {"CUDA0": 7}) == [
+        {"label": "CUDA0", "bytes": 200 * app_module.MIB, "kind": "gpu", "gpu_index": 7}]
+
+
 def test_python_server_serves_built_react_ui(client):
     response = client.get("/")
     assert response.status_code == 200

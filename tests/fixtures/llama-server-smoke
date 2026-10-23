@@ -14,6 +14,7 @@ parser.add_argument("--log-file")
 args, _ = parser.parse_known_args()
 log = Path(args.log_file)
 log.write_text("common_init: fitting params to device memory ...\n"
+               "load_tensors: CPU model buffer size = 9000.00 MiB\n"
                "print_info: n_layer = 1\n"
                "load_tensors: layer 0 assigned to device CUDA9\n"
                "load_tensors: layer 1 assigned to device CUDA9\n"
