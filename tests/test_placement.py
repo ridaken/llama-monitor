@@ -51,6 +51,11 @@ def test_draft_projector_and_model_replacement_do_not_merge():
     assert parser.snapshot("main.gguf")["total_layers"] == 3
     assert parser.snapshot("new.gguf")["status"] == "unavailable"
     parser = parse(model_log() + model_log(("CPU",), "CPU", "main.gguf"))
+    # Same file can be loaded for both main and draft; do not guess its role.
+    assert parser.snapshot("main.gguf")["status"] == "unavailable"
+    parser.feed("build: 2 (replacement)")
+    for message in model_log(("CPU",), "CPU", "main.gguf").splitlines():
+        parser.feed(message)
     assert parser.snapshot("main.gguf")["total_layers"] == 1
 
 

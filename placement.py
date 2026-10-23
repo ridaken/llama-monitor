@@ -67,8 +67,7 @@ class LayerPlacement:
                     and len(b["layers"]) in (b["total"], b["total"] + 1)
                     and all(i in b["layers"] for i in range(b["total"]))
                     and all(0 <= i <= b["total"] for i in b["layers"])]
-        paths = {b["path"] for b in blocks}
-        if len(paths) > 1 or (len(blocks) > 1 and None in paths):
+        if len(blocks) > 1:
             return {"status": "unavailable", "reason": "Cannot identify main-model placement reliably.", "devices": []}
         if not complete or complete[-1] is not blocks[-1]:
             if blocks and blocks[-1]["shared"]:
