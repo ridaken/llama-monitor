@@ -13,7 +13,10 @@ parser.add_argument("--port", type=int)
 parser.add_argument("--log-file")
 args, _ = parser.parse_known_args()
 log = Path(args.log_file)
-log.write_text("print_info: n_layer = 2\n"
+log.write_text("common_init_result: fitting params to device memory\n"
+               "load_tensors: CPU model buffer size = 9000.00 MiB\n"
+               "llama_params_fit: fitting params to free memory took 0.01 seconds\n"
+               "print_info: n_layer = 2\n"
                "load_tensors: layer 0 assigned to device CPU, is_swa = 0\n"
                "load_tensors: layer 1 assigned to device CPU, is_swa = 0\n"
                "load_tensors: layer 2 assigned to device CPU, is_swa = 0\n"

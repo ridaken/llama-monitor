@@ -116,6 +116,9 @@ def main():
             assert cli("smoke", "--timeout", "10")["message"]["content"] == "smoke response"
             assert cli("stats")["runtime"]["containerized"]
             eventually(lambda: cli("stats")["layer_placement"]["status"] == "available")
+            memory = cli("stats")
+            assert memory["split_source"] == "log"
+            assert memory["split"] == [{"label": "CPU", "bytes": 1024**2, "kind": "cpu"}]
             placement = cli("stats")["layer_placement"]
             assert placement["total_layers"] == 2 and placement["output_device"] == "CPU"
             assert placement["devices"] == [{"label": "CPU", "layers": 2}]

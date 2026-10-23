@@ -66,7 +66,7 @@ def _seg(label: str, num_bytes: int) -> dict:
     return {"label": label, "bytes": num_bytes, "kind": "cpu" if label == "CPU" else "gpu"}
 
 
-def _delta_split(baseline: dict, gpu_data: dict) -> list:
+def _delta_split(baseline: dict, gpu_data: dict, indices: dict) -> list:
     """Estimate per-GPU model footprint = free-at-load minus free-now (NVML).
 
     Approximate: other processes allocating/freeing GPU memory since load can
@@ -74,14 +74,14 @@ def _delta_split(baseline: dict, gpu_data: dict) -> list:
     by unrelated OS/app/disk-cache activity and is not attributable to llama.
     """
     split = []
-    for d in gpu_data.get("devices", []):
-        key = f"CUDA{d['index']}"
-        base = baseline.get(key)
-        if base is None or d.get("mem_total") is None:
+    devices = {d["index"]: d for d in gpu_data.get("devices", [])}
+    for key, base in baseline.items():
+        d = devices.get(indices.get(key))
+        if d is None or d.get("mem_total") is None:
             continue
         free_now_mib = (d["mem_total"] - d.get("mem_used", 0)) / MIB
         est = max(0.0, base - free_now_mib)
-        split.append(_seg(key, int(est * MIB)))
+        split.append({**_seg(key, int(est * MIB)), "gpu_index": d["index"]})
     return split
 
 
@@ -441,7 +441,7 @@ def build_app(args) -> FastAPI:
 
         # Build the memory-split view, best source first:
         #   1. NVML per-process VRAM       — exact (Linux / TCC drivers only)
-        #   2. log buffer-size lines       — exact (builds that print them)
+        #   2. log buffer-size lines       — allocations, not physical residency
         #   3. NVML delta vs log baseline  — live approximation (Windows/WDDM)
         split = []
         source = None
@@ -460,7 +460,16 @@ def build_app(args) -> FastAPI:
                     split.append(_seg(label, int(mib * MIB)))
                 source = "log"
             elif cache["baseline"]:
-                split, source = _delta_split(cache["baseline"], gpu_data), "nvml-delta"
+                split, source = _delta_split(cache["baseline"], gpu_data,
+                    cache["layer_parser"].device_indices(gpu_data)), "nvml-delta"
+
+        # CUDA ordinals can be reordered relative to NVML. Only join logged
+        # allocations to hardware when a UUID/PCI identity confirms the match.
+        indices = (cache["layer_parser"].device_indices(gpu_data) if source in ("log", "nvml-delta") else
+                   {f"CUDA{d['index']}": d["index"] for d in gpu_data.get("devices", [])})
+        for entry in split:
+            if entry["label"] in indices:
+                entry["gpu_index"] = indices[entry["label"]]
 
         data["split"] = split
         data["split_source"] = source

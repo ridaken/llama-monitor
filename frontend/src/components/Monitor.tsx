@@ -1,4 +1,4 @@
-import { Activity, Boxes, CircuitBoard, Cpu, Gauge, Zap } from 'lucide-react'
+import { Activity, CircuitBoard, Cpu, Gauge, Zap } from 'lucide-react'
 import {
   ConfigurationPanel,
   LaunchControls,
@@ -20,19 +20,12 @@ import type { useMonitor } from '@/hooks/useMonitor'
 import { useMonitorFit } from '@/hooks/useMonitorFit'
 
 type MonitorData = ReturnType<typeof useMonitor>
-const splitColors = [
-  '#ff6a00',
-  '#9e86eb',
-  '#56c5a8',
-  '#e5ad66',
-  '#de83aa',
-  '#66c4d4',
-]
-const sourceNote: Record<string, string> = {
-  nvml: 'Exact per-process VRAM from NVML',
-  log: 'From llama-server load log',
+type MemoryEntry = NonNullable<Stats['split']>[number]
+const memoryNotes: Record<string, string> = {
+  nvml: 'Live llama-server VRAM measured by NVML. Teal is llama-server; orange is the rest of current device usage.',
+  log: 'Buffer sizes from the load log: weights, KV cache and work buffers. CPU includes mapped files and pinned RAM. These sizes are not live physical usage.',
   'nvml-delta':
-    'Approximate VRAM change since model load; other apps can affect it',
+    'Estimated change in VRAM since model load. Other apps can affect this value; it is not a measured process allocation.',
 }
 
 function Info({ children, label }: { children: string; label: string }) {
@@ -102,6 +95,90 @@ function Row({
         {value}
       </span>
     </div>
+  )
+}
+
+function ModelMemory({
+  entry,
+  source,
+  capacity,
+}: {
+  entry?: MemoryEntry
+  source?: string | null
+  capacity?: number | null
+}) {
+  if (!entry) return null
+  const label =
+    source === 'nvml'
+      ? 'llama-server VRAM'
+      : source === 'log'
+        ? 'llama.cpp buffers · logged'
+        : 'llama-server · estimate'
+  return (
+    <div className="model-memory">
+      <Row
+        label={label}
+        value={fmtGB(entry.bytes)}
+        info={memoryNotes[source || '']}
+      />
+      {capacity != null && entry.bytes > capacity && (
+        <p className="text-xs text-amber-400" role="status">
+          Exceeds device capacity; not resident VRAM.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function VramBar({
+  used,
+  total,
+  memory,
+  source,
+}: {
+  used?: number | null
+  total?: number | null
+  memory?: MemoryEntry
+  source?: string | null
+}) {
+  const measured =
+    source === 'nvml' &&
+    memory &&
+    used != null &&
+    total != null &&
+    total > 0 &&
+    memory.bytes >= 0 &&
+    memory.bytes <= used &&
+    used <= total
+  const pct = total && used != null ? clamp((used / total) * 100) : 0
+  if (!measured) return <Progress value={pct} className="mt-2 h-1.5" />
+  return (
+    <>
+      <div
+        className="vram-bar mt-2 flex h-1.5 overflow-hidden rounded-full bg-primary/20"
+        role="img"
+        aria-label={`VRAM: llama-server ${fmtGB(memory.bytes)}, other usage ${fmtGB(used - memory.bytes)}, capacity ${fmtGB(total)}`}
+      >
+        <span
+          className="vram-model"
+          style={{ width: `${(memory.bytes / total) * 100}%` }}
+        />
+        <span
+          className="bg-primary"
+          style={{ width: `${((used - memory.bytes) / total) * 100}%` }}
+        />
+      </div>
+      <div className="vram-legend mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+        <span>
+          <i className="vram-model inline-block size-2 rounded-sm" />{' '}
+          llama-server
+        </span>
+        <span>
+          <i className="inline-block size-2 rounded-sm bg-primary" /> Other
+          usage
+        </span>
+      </div>
+    </>
   )
 }
 
@@ -259,12 +336,19 @@ export function Monitor({
         ? `${spec.mean_len != null ? `${spec.mean_len.toFixed(2)} tok/step` : ''}${spec.accept_rate != null ? ` · ${(spec.accept_rate * 100).toFixed(0)}% accept` : ''} (last req)`
         : 'MTP on · idle'
   const split = d?.split || []
-  const splitTotal = split.reduce((sum, item) => sum + item.bytes, 0)
   const placement = d?.layer_placement
-  const unmatched =
-    placement?.devices.filter(
-      (entry) => entry.label !== 'CPU' && entry.gpu_index == null,
-    ) || []
+  const gpuIndices = new Set(d?.gpu?.devices?.map((device) => device.index))
+  const unmatched = new Map(
+    (placement?.devices || [])
+      .filter((entry) => entry.label !== 'CPU' && entry.gpu_index == null)
+      .map((entry) => [entry.label, entry]),
+  )
+  for (const entry of split) {
+    if (entry.kind === 'gpu' && !gpuIndices.has(entry.gpu_index ?? -1)) {
+      if (!unmatched.has(entry.label))
+        unmatched.set(entry.label, { label: entry.label, layers: 0 })
+    }
+  }
   return (
     <TooltipProvider delayDuration={150}>
       <div ref={fitRef} className="monitor-layout">
@@ -400,58 +484,6 @@ export function Monitor({
             />
           </Panel>
           <Panel
-            title="Memory split"
-            icon={Boxes}
-            info="Estimated model footprint by device; the source note explains accuracy."
-            className="monitor-split"
-          >
-            <div
-              id="split-bar"
-              className="flex h-3 overflow-hidden rounded-full bg-muted"
-            >
-              {splitTotal > 0 &&
-                split.map((item, i) => (
-                  <span
-                    key={`${item.label}-${i}`}
-                    style={{
-                      width: `${(item.bytes / splitTotal) * 100}%`,
-                      background: splitColors[i % splitColors.length],
-                    }}
-                  />
-                ))}
-            </div>
-            <div id="split-legend" className="mt-4 space-y-2">
-              {splitTotal ? (
-                split.map((item, i) => (
-                  <div
-                    key={`${item.label}-${i}`}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span
-                        className="size-2.5 rounded-sm"
-                        style={{
-                          background: splitColors[i % splitColors.length],
-                        }}
-                      />
-                      {item.label}
-                    </span>
-                    <span className="mono">{fmtGB(item.bytes)}</span>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {d?.split_log_configured
-                    ? 'Waiting for model load information.'
-                    : 'Attach a llama-server log to show the per-device split.'}
-                </p>
-              )}
-            </div>
-            <p id="split-note" className="mt-3 text-xs text-muted-foreground">
-              {sourceNote[d?.split_source || ''] || ''}
-            </p>
-          </Panel>
-          <Panel
             title="Slots"
             icon={Activity}
             info="Parallel inference lanes. Idle slots can retain a prompt cache."
@@ -549,10 +581,12 @@ export function Monitor({
                         label="RAM"
                         value={`${fmtGB(d.sysmem.used)} / ${fmtGB(d.sysmem.total)}`}
                       />
-                      <Row
-                        label="llama-server RSS"
-                        value={fmtGB(d.sysmem.llama_rss)}
-                      />
+                      <div className="model-memory">
+                        <Row
+                          label="llama-server RSS"
+                          value={fmtGB(d.sysmem.llama_rss)}
+                        />
+                      </div>
                     </>
                   ) : (
                     <p className="text-sm text-muted-foreground">
@@ -560,12 +594,16 @@ export function Monitor({
                     </p>
                   )}
                 </div>
+                <ModelMemory
+                  entry={split.find((entry) => entry.kind === 'cpu')}
+                  source={d?.split_source}
+                />
               </div>
               {(d?.gpu?.devices || []).map((device) => {
                 const hist = samples.gpu[device.index]
-                const memPct = device.mem_total
-                  ? ((device.mem_used || 0) / device.mem_total) * 100
-                  : 0
+                const memory = split.find(
+                  (entry) => entry.gpu_index === device.index,
+                )
                 return (
                   <div
                     key={device.index}
@@ -635,11 +673,21 @@ export function Monitor({
                         {fmtGB(device.mem_used)} / {fmtGB(device.mem_total)}
                       </span>
                     </div>
-                    <Progress value={clamp(memPct)} className="mt-2 h-1.5" />
+                    <VramBar
+                      used={device.mem_used}
+                      total={device.mem_total}
+                      memory={memory}
+                      source={d?.split_source}
+                    />
+                    <ModelMemory
+                      entry={memory}
+                      source={d?.split_source}
+                      capacity={device.mem_total}
+                    />
                   </div>
                 )
               })}
-              {unmatched.map((entry) => (
+              {Array.from(unmatched.values()).map((entry) => (
                 <div
                   key={entry.label}
                   className="monitor-placement rounded-xl border border-border/70 bg-background/30 p-4"
@@ -649,8 +697,12 @@ export function Monitor({
                     {entry.name ? ` · ${entry.name}` : ''}
                   </strong>
                   <LayerRows placement={placement} label={entry.label} />
+                  <ModelMemory
+                    entry={split.find((memory) => memory.label === entry.label)}
+                    source={d?.split_source}
+                  />
                   <p className="mt-3 text-xs text-muted-foreground">
-                    Hardware telemetry unavailable for this device.
+                    Hardware telemetry could not be matched to this device.
                   </p>
                 </div>
               ))}

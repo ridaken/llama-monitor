@@ -607,13 +607,38 @@ def _norm_device(label: str) -> str:
     return up
 
 
+class DeviceMemory:
+    """Track logged allocations, excluding llama.cpp's no-allocation fit passes."""
+
+    def __init__(self):
+        self.totals: dict[str, float] = {}
+        self.fitting = False
+
+    def feed(self, message: str) -> None:
+        lower = message.lower()
+        if lower.startswith("build:"):
+            self.totals.clear()
+            self.fitting = False
+        # --fit can print several hypothetical model/context allocations before
+        # loading the real model. They are requirements, not resident buffers.
+        if "fitting params to device memory" in lower:
+            self.fitting = True
+        if "fitting params to free memory took" in lower:
+            self.fitting = False
+        if self.fitting:
+            return
+        for label, mib in _BUF_RE.findall(message):
+            name = _norm_device(label)
+            self.totals[name] = self.totals.get(name, 0.0) + float(mib)
+
+
 def parse_device_split(log_path: str) -> dict[str, float]:
     """Sum per-device buffer allocations (MiB) from a llama-server startup log.
 
     Returns an ordered dict like {"CUDA0": 8804.0, "CUDA1": 7100.0, "CPU": 8123.45}
-    covering model + KV + compute buffers for the most recent run. This is the
-    reliable way to get the memory split on Windows/WDDM, where NVML cannot
-    report per-process VRAM.
+    covering model + KV + compute buffers for the most recent run, excluding
+    preliminary memory-fit passes. These are logged allocation sizes, not a
+    measurement of physical residency or current per-process VRAM.
     """
     try:
         with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -626,9 +651,10 @@ def parse_device_split(log_path: str) -> dict[str, float]:
     if starts:
         text = text[starts[-1]:]
 
-    sums: dict[str, float] = {}
-    for label, mib in _BUF_RE.findall(text):
-        sums[_norm_device(label)] = sums.get(_norm_device(label), 0.0) + float(mib)
+    memory = DeviceMemory()
+    for line in text.splitlines():
+        memory.feed(line)
+    sums = memory.totals
 
     # Order: CUDA0, CUDA1, … then any other accel, then CPU last.
     def sort_key(k: str):

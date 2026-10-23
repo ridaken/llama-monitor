@@ -8,6 +8,7 @@ const gpuNames = [
 ]
 const hardwareStats = (count: number) => ({
   ...stats,
+  split: stats.split.filter((entry) => entry.kind === 'cpu' || count > 1),
   gpu: {
     ...stats.gpu,
     devices: Array.from({ length: count - 1 }, (_, index) => ({

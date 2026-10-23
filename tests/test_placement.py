@@ -87,6 +87,18 @@ def test_identity_matching_never_uses_cuda_ordinal():
     assert device_identity("unknown id") is None
 
 
+def test_memory_identity_matching_does_not_require_layer_assignments():
+    parser = parse("llama_model_load: using device CUDA0 (GPU A) (0000:01:00.0) - 1024 MiB free\n")
+    gpu = {"devices": [{"index": 7, "pci_bus_id": "00000000:01:00.0"}, {"index": 0}]}
+    assert parser.snapshot()["status"] == "unavailable"
+    assert parser.device_indices(gpu) == {"CUDA0": 7}
+    assert parser.device_indices({"devices": [{"index": 0}]}) == {}
+    parser.feed("llama_model_load: using device CUDA0 (GPU B) (0000:02:00.0) - 1024 MiB free")
+    assert parser.device_indices(gpu) == {}
+    parser.feed("build: 2 (replacement)")
+    assert parser.device_indices(gpu) == {}
+
+
 @pytest.mark.parametrize("state,online,expected", [("running", False, "loading"), ("stopped", True, "no_model"), ("exited", True, "no_model"), (None, False, "no_model")])
 def test_lifecycle_suppresses_stale_cached_counts(state, online, expected):
     result = placement_response(parse(model_log()), {}, online=online, managed_state=state)

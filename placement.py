@@ -22,6 +22,7 @@ class LayerPlacement:
         self.blocks = []
         self.current = None
         self.pending_shared = False
+        self.identities = {}
 
     def feed(self, message):
         if re.match(r"^(?:[\d:.]+\s+)?(?:[IWD]\s+)?(?:main:\s*)?build(?:\s*=|:)\s*\d+", message, re.I):
@@ -46,12 +47,28 @@ class LayerPlacement:
         if total:
             block["total"] = int(total.group(1))
         for label, name, identity in _DEVICE.findall(message):
-            block["devices"][label.upper()] = {"name": name, "identity": device_identity(identity)}
+            label, identity = label.upper(), device_identity(identity)
+            block["devices"][label] = {"name": name, "identity": identity}
+            if identity:
+                self.identities.setdefault(label, set()).add(identity)
         for index, label in _LAYER.findall(message):
             index, label = int(index), label.upper()
             previous = block["layers"].get(index)
             block["conflict"] |= previous is not None and previous != label
             block["layers"][index] = label
+
+    def device_indices(self, gpu_data):
+        """Match logged device IDs even before layer assignments are complete."""
+        result = {}
+        for label, identities in self.identities.items():
+            if len(identities) != 1:
+                continue
+            identity = next(iter(identities))
+            matches = [d for d in gpu_data.get("devices", []) if identity in
+                       (device_identity(d.get("uuid")), device_identity(d.get("pci_bus_id")))]
+            if len(matches) == 1:
+                result[label] = matches[0]["index"]
+        return result
 
     def snapshot(self, model_path=None):
         blocks = [b for b in self.blocks if b["total"] is not None]
