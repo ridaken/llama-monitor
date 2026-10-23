@@ -1,6 +1,43 @@
 import { expect, test } from '@playwright/test'
 import { mockApi, stats } from './fixtures'
 
+test('Fit Hardware hugs its cards on a tall three-GPU dashboard', async ({
+  page,
+}) => {
+  await mockApi(page, {
+    'GET /api/stats': () => ({
+      ...stats,
+      gpu: {
+        ...stats.gpu,
+        devices: [0, 1, 2].map((index) => ({
+          ...stats.gpu.devices[0],
+          index,
+        })),
+      },
+    }),
+  })
+  await page.setViewportSize({ width: 2560, height: 1440 })
+  await page.goto('/')
+  const layout = await page.locator('.monitor-hardware').evaluate((panel) => {
+    const grid = panel.querySelector('.hardware-grid')!
+    const cards = Array.from(grid.children)
+    return {
+      gap:
+        grid.getBoundingClientRect().bottom -
+        Math.max(...cards.map((card) => card.getBoundingClientRect().bottom)),
+      bottom: panel.getBoundingClientRect().bottom,
+      viewport: innerHeight,
+    }
+  })
+  expect(layout.gap).toBeLessThan(2)
+  expect(layout.bottom).toBeLessThanOrEqual(layout.viewport)
+  if (process.env.CAPTURE_UI === '1')
+    await page.screenshot({
+      path: 'test-results/hardware-fit-three-gpu.png',
+      fullPage: true,
+    })
+})
+
 test('Hardware combines RAM metrics and matched GPU placement, excluding the output layer', async ({
   page,
 }) => {

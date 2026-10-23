@@ -183,7 +183,6 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
     const bottom = await page
       .locator('.monitor-hardware')
       .evaluate((panel) => panel.getBoundingClientRect().bottom)
-    expect(bottom).toBeGreaterThan(height * 0.88)
     expect(bottom).toBeLessThanOrEqual(height)
     const layout = await page.evaluate(() => {
       const controls = document

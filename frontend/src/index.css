@@ -320,8 +320,10 @@ button:disabled {
   .app-fit .monitor-telemetry {
     align-self: start;
     align-content: stretch;
-    height: max(595px, calc(100dvh - 264px));
-    grid-template-rows: minmax(140px, auto) minmax(170px, auto) minmax(0, 1fr);
+    max-height: max(595px, calc(100dvh - 264px));
+    grid-template-rows:
+      minmax(140px, max-content) minmax(170px, max-content)
+      minmax(0, max-content);
   }
   .monitor-decode,
   .monitor-session {
@@ -516,8 +518,10 @@ button:disabled {
     font-size: 14px;
   }
   .app-fit .monitor-telemetry {
-    height: calc(100dvh - 320px);
-    grid-template-rows: minmax(210px, auto) minmax(220px, auto) minmax(0, 1fr);
+    max-height: calc(100dvh - 320px);
+    grid-template-rows:
+      minmax(210px, max-content) minmax(220px, max-content)
+      minmax(0, max-content);
   }
   .app-fit #slots {
     grid-template-columns: repeat(2, minmax(0, 1fr));
