@@ -516,10 +516,7 @@ export function Monitor({
             }
             className="monitor-hardware"
           >
-            <div
-              id="gpus"
-              className="hardware-grid grid gap-4 md:grid-cols-2 xl:grid-cols-3"
-            >
+            <div id="gpus" className="hardware-grid grid gap-4">
               <div className="monitor-cpu rounded-xl border border-border/70 bg-background/30 p-4">
                 <strong className="mb-3 block">
                   {d?.runtime?.containerized ? 'CPU & Docker RAM' : 'CPU & RAM'}
@@ -578,7 +575,10 @@ export function Monitor({
                       <strong>
                         GPU {device.index} · {device.name || 'GPU'}
                       </strong>
-                      <Badge variant="secondary">
+                      <Badge
+                        variant="secondary"
+                        className="shrink-0 whitespace-nowrap"
+                      >
                         {fmt(device.power, 0)} W
                       </Badge>
                     </div>
@@ -614,7 +614,7 @@ export function Monitor({
                       ).map(([label, key, value, max, color, unit]) => (
                         <div
                           key={key}
-                          className="grid grid-cols-[48px_1fr_70px] items-center gap-2 text-xs"
+                          className="monitor-gpu-trend grid items-center gap-2 text-xs"
                         >
                           <span className="text-muted-foreground">{label}</span>
                           <Spark

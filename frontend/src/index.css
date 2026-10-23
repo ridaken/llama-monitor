@@ -689,12 +689,39 @@ button:disabled {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-.hardware-grid:has(> :only-child) {
-  grid-template-columns: 1fr;
+.monitor-hardware .monitor-panel-content {
+  container: hardware / inline-size;
 }
-@media (min-width: 768px) {
-  .hardware-grid:has(> :nth-child(2):last-child) {
+.hardware-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.hardware-grid > *,
+.hardware-grid .monitor-spark,
+.hardware-grid .monitor-row > span {
+  min-width: 0;
+}
+.hardware-grid strong,
+.hardware-grid .monitor-row > span {
+  overflow-wrap: anywhere;
+}
+.monitor-gpu-trend {
+  grid-template-columns: 48px minmax(0, 1fr) minmax(70px, max-content);
+}
+/* Use the section's content width so neighboring dashboard tiles can reduce
+   the column count without requiring a viewport resize. */
+@container hardware (min-width: 656px) {
+  .hardware-grid:has(> :nth-child(2)) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container hardware (min-width: 992px) {
+  .hardware-grid:has(> :nth-child(3)) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@container hardware (min-width: 1328px) {
+  .hardware-grid:has(> :nth-child(4)) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 @media (prefers-reduced-motion: reduce) {
