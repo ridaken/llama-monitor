@@ -93,6 +93,7 @@ def test_gaming_stats_clear_stale_memory_but_keep_hardware(client, monkeypatch):
         "online": True, "model": {"name": "stale"}, "kv": {"tokens": 4000}})
     response = client.get("/api/stats").json()
     assert not response["online"] and response["split"] == []
+    assert response["layer_placement"]["status"] == "no_model"
     assert "model" not in response and "kv" not in response
     assert "gpu" in response and "sysmem" in response
 

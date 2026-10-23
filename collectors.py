@@ -437,6 +437,15 @@ class GpuCollector:
             try:
                 h = pynvml.nvmlDeviceGetHandleByIndex(i)
                 d["name"] = _decode(pynvml.nvmlDeviceGetName(h))
+                # Optional stable identities: CUDA ordinals can differ from NVML.
+                try:
+                    d["uuid"] = _decode(pynvml.nvmlDeviceGetUUID(h))
+                except Exception:
+                    pass
+                try:
+                    d["pci_bus_id"] = _decode(pynvml.nvmlDeviceGetPciInfo(h).busId)
+                except Exception:
+                    pass
                 try:
                     mem = pynvml.nvmlDeviceGetMemoryInfo(h)
                     d["mem_total"] = mem.total

@@ -26,8 +26,7 @@ ENV PATH="/opt/venv/bin:/app:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     LLAMA_MONITOR_CONTAINER=1 \
-    LLAMA_MONITOR_DATA_DIR=/data \
-    LLAMA_ARG_LOG_VERBOSITY=4
+    LLAMA_MONITOR_DATA_DIR=/data
 WORKDIR /opt/llama-monitor
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt

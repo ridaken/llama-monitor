@@ -22,6 +22,7 @@ from typing import Iterator, Optional
 
 import store
 from collectors import LogTailer, _BUF_RE, _DEVINFO_RE, _SPEC_RE, _norm_device
+from placement import LayerPlacement
 
 
 def decode_log_line(raw: str) -> Optional[str]:
@@ -397,6 +398,7 @@ class LogFollower:
         self.split: dict[str, float] = {}
         self.baseline: dict[str, float] = {}
         self.spec = False
+        self.placement = LayerPlacement()
         self.attach(path, run_id=run_id, managed=managed, started_at=started_at,
                     prompt_dir=prompt_dir)
 
@@ -425,6 +427,7 @@ class LogFollower:
             self.split = {}
             self.baseline = {}
             self.spec = False
+            self.placement = LayerPlacement()
             if not self.path:
                 return
             previous = self.db.get_cursor(self.path)
@@ -493,6 +496,8 @@ class LogFollower:
             self.split = {}
             self.baseline = {}
             self.spec = False
+            self.placement = LayerPlacement()
+        self.placement.feed(msg)
         for label, mib in _BUF_RE.findall(msg):
             name = _norm_device(label)
             self.split[name] = self.split.get(name, 0.0) + float(mib)
@@ -528,7 +533,8 @@ class LogFollower:
                     "gap": self.gap, "error": self.error, "run_id": self.run_id,
                     "prompts_configured": bool(self.prompt_dir),
                     "activity_seq": self.activity_seq, "split": dict(self.split),
-                    "baseline": dict(self.baseline), "spec": self.spec}
+                    "baseline": dict(self.baseline), "spec": self.spec,
+                    "layer_parser": copy.deepcopy(self.placement), "managed": self.managed}
 
     def _poll_prompts(self) -> None:
         if not self.prompt_dir or not self.run_id:
@@ -672,6 +678,7 @@ class LogFollower:
                 self.split = {}
                 self.baseline = {}
                 self.spec = False
+                self.placement = LayerPlacement()
                 self.db.ensure_run(self.run_id, "managed" if self.managed else "external",
                                    self.started_at)
             if stat.st_size == self.offset:
@@ -695,7 +702,7 @@ class LogFollower:
             rows: dict[str, dict] = {}
             before = (copy.deepcopy(self.slots), dict(self.split), dict(self.baseline),
                       self.spec, self.activity_seq, self.run_id, self.model,
-                      self.started_at, self._model_dirty)
+                      self.started_at, self._model_dirty, copy.deepcopy(self.placement))
             try:
                 for raw in complete.splitlines():
                     try:
@@ -734,7 +741,7 @@ class LogFollower:
                     self.db.match_prompts(self.run_id)
             except Exception:
                 (self.slots, self.split, self.baseline, self.spec, self.activity_seq,
-                 self.run_id, self.model, self.started_at, self._model_dirty) = before
+                 self.run_id, self.model, self.started_at, self._model_dirty, self.placement) = before
                 raise
 
     def _generation(self, msg: str, observed: float) -> list[dict]:

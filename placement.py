@@ -1,0 +1,114 @@
+"""Conservative, log-derived primary layer assignments (not tensor residency)."""
+from collections import Counter
+import os
+import re
+
+
+_TOTAL = re.compile(r"\bn_layer\s*=\s*(\d+)\b")
+_LAYER = re.compile(r"load_tensors:\s*layer\s+(\d+)\s+assigned to device\s+([^\s,]+)", re.I)
+_FILE = re.compile(r"loaded meta data .*? from (.+?) \(version", re.I)
+_DEVICE = re.compile(r"using device (\S+) \((.*?)\) \((.*?)\) -", re.I)
+
+
+def device_identity(value):
+    """Normalize UUIDs and PCI bus IDs, including NVML's eight-digit domain."""
+    value = (value or "").strip().lower()
+    pci = re.fullmatch(r"(?:0{4})?([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.\d)", value)
+    return pci.group(1) if pci else value if value.startswith("gpu-") else None
+
+
+class LayerPlacement:
+    def __init__(self):
+        self.blocks = []
+        self.current = None
+        self.pending_shared = False
+
+    def feed(self, message):
+        if re.match(r"^(?:[\d:.]+\s+)?(?:[IWD]\s+)?(?:main:\s*)?build(?:\s*=|:)\s*\d+", message, re.I):
+            self.__init__()
+            return
+        shared = bool(re.search(r"\bsplit[_ -]mode\s*[=:]\s*(row|tensor)\b|CUDA_Split.*model buffer", message, re.I))
+        file = _FILE.search(message)
+        total = _TOTAL.search(message)
+        if file or (total and self.current and self.current["total"] is not None):
+            self.current = None
+        if self.current is None and (file or total or _DEVICE.search(message)):
+            self.current = {"path": file.group(1).strip() if file else None,
+                            "total": None, "layers": {}, "devices": {}, "conflict": False,
+                            "shared": self.pending_shared}
+            self.pending_shared = False
+            self.blocks.append(self.current)
+        block = self.current
+        if block is None:
+            self.pending_shared |= shared
+            return
+        block["shared"] |= shared
+        if total:
+            block["total"] = int(total.group(1))
+        for label, name, identity in _DEVICE.findall(message):
+            block["devices"][label.upper()] = {"name": name, "identity": device_identity(identity)}
+        for index, label in _LAYER.findall(message):
+            index, label = int(index), label.upper()
+            previous = block["layers"].get(index)
+            block["conflict"] |= previous is not None and previous != label
+            block["layers"][index] = label
+
+    def snapshot(self, model_path=None):
+        blocks = [b for b in self.blocks if b["total"] is not None]
+        if model_path:
+            norm = lambda p: os.path.normcase(os.path.normpath(p))
+            matches = [b for b in blocks if b["path"] and norm(b["path"]) == norm(model_path)]
+            if matches:
+                blocks = matches
+            elif any(b["path"] for b in blocks):
+                return {"status": "unavailable", "reason": "No placement records match the loaded model.", "devices": []}
+        # Never combine or guess between main, draft, projector or retry loads.
+        complete = [b for b in blocks if not b["conflict"] and b["total"] > 0
+                    and len(b["layers"]) in (b["total"], b["total"] + 1)
+                    and all(i in b["layers"] for i in range(b["total"]))
+                    and all(0 <= i <= b["total"] for i in b["layers"])]
+        paths = {b["path"] for b in blocks}
+        if len(paths) > 1 or (len(blocks) > 1 and None in paths):
+            return {"status": "unavailable", "reason": "Cannot identify main-model placement reliably.", "devices": []}
+        if not complete or complete[-1] is not blocks[-1]:
+            if blocks and blocks[-1]["shared"]:
+                return {"status": "shared", "reason": "Weights are shared across devices; exclusive layer counts do not apply.", "devices": []}
+            return {"status": "unavailable", "reason": "Startup log lacks complete layer assignments. Restart with debug logging enabled.", "devices": []}
+        block = complete[-1]
+        total = block["total"]
+        counts = Counter(block["layers"][i] for i in range(total))
+        labels = set(counts) | set(block["devices"]) | {"CPU"}
+        if total in block["layers"]:
+            labels.add(block["layers"][total])
+        return {"status": "shared" if block["shared"] else "available", "reason": None,
+                "total_layers": total, "output_device": block["layers"].get(total),
+                "devices": [{"label": label, "layers": counts[label],
+                             **block["devices"].get(label, {})} for label in sorted(labels)]}
+
+
+def placement_response(parser, gpu_data, *, online, managed_state=None, model_path=None, config=None):
+    if managed_state in ("stopped", "exited"):
+        return {"status": "no_model", "reason": "No model loaded", "devices": []}
+    if not online:
+        return {"status": "loading" if managed_state == "running" else "no_model",
+                "reason": "Loading" if managed_state == "running" else "No model loaded", "devices": []}
+    result = parser.snapshot(model_path)
+    # --tensor-split alone is also used for ordinary layer splitting.
+    split_mode = None
+    for flag in (config or {}).get("flags", []):
+        name, _, inline = flag.get("flag", "").partition("=")
+        if flag.get("enabled") is not False and name in ("-sm", "--split-mode"):
+            split_mode = inline or flag.get("value")
+    if split_mode is None and managed_state:
+        split_mode = os.environ.get("LLAMA_ARG_SPLIT_MODE")
+    if split_mode in ("row", "tensor"):
+        result["status"] = "shared"
+        result["reason"] = "Weights are shared across devices; exclusive layer counts do not apply."
+    devices = gpu_data.get("devices", [])
+    for entry in result["devices"]:
+        identity = entry.get("identity")
+        matches = [d for d in devices if identity and identity in
+                   (device_identity(d.get("uuid")), device_identity(d.get("pci_bus_id")))]
+        if len(matches) == 1:
+            entry["gpu_index"] = matches[0]["index"]
+    return result

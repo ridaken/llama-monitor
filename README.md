@@ -15,10 +15,10 @@ live (1s refresh):
   (e.g. `CUDA0: 10.0 GB · CUDA1: 12.0 GB`)
 - **Slots** — per-slot state (idle / prefill / generating), context fill, prompt
   length and tokens generated
-- **GPU hardware** — per-GPU temp/util/power sparklines, VRAM, and total draw
-- **System memory** — system RAM used/total with a sparkline, plus the
-  llama-server process's resident set size (where a model spills over when it
-  doesn't fit in VRAM)
+- **Hardware** — a CPU & RAM card and individual GPU cards, with primary model
+  layer assignments and separate output-layer placement. Includes RAM usage and
+  trend, llama-server RSS, per-GPU temp/util/power trends, VRAM, and total GPU draw.
+  Docker RAM describes the container/VM, not Windows host RAM.
 - **Activity history** — sortable, filterable generations observed in the log,
   retained in local SQLite until you clear them
 
@@ -293,6 +293,39 @@ and `POST /api/launcher/smoke` with an optional `timeout` in seconds. Smoke
 returns HTTP 409 for verification failures, 504 for deadlines, and 422 for invalid
 input. Existing `/api/health` remains a backend-only probe. These endpoints use
 the same trusted-network access model as existing launcher controls.
+
+### Per-device model layers
+
+Hardware reports **Assigned model layers: N / total** for the main model's
+transformer layers. The output layer appears separately. Counts come from complete
+startup-log assignments, not memory usage or requested `--gpu-layers` values.
+They describe primary device assignment: expert/tensor overrides may store some
+weights elsewhere. Known row/tensor splitting displays **Shared across devices**.
+Main-model counts never include a separate draft model or projector.
+
+For future managed launches, the launcher adds `--log-verbosity 5` when the
+installed binary advertises it. Debug logging increases log volume. Explicit
+`-lv`, `--verbosity`, `--log-verbosity`, verbose/log-disable flags and logging
+environment overrides take precedence. For example, add `--log-verbosity 3` to
+reduce logs; detailed placement may then be unavailable. The old container level-4
+default is replaced by the launcher's capability-checked default; user-provided
+`LLAMA_ARG_LOG_VERBOSITY` is honored at any value.
+
+An already loaded or externally launched model needs retained debug startup records;
+otherwise Hardware shows **Unavailable** with restart guidance. External launch
+arguments are never modified. Hardware remains visible without a model, and counts
+clear on managed stop, crash, or gaming suspension. GPU identities are matched by
+PCI bus ID or UUID, not CUDA ordinal; unmatched logged devices get placement-only
+cards rather than borrowing another GPU's telemetry. Extra device cards wrap and
+scroll inside Hardware in desktop Fit mode; Comfortable uses natural page scrolling.
+
+`GET /api/stats` (also `cli.py stats --json`) adds `layer_placement` with `status`
+(`available`, `shared`, `loading`, `no_model`, `unavailable`), `reason`, and `devices`.
+Complete records also include `total_layers` and `output_device` (null when absent).
+Each device has `label`, `layers`, optional `name`/`identity`, and `gpu_index` only
+when matched to an NVML device. Zero is published only with a complete transformer
+layer map. Existing `gpu`, `sysmem`, and `split` fields are unchanged. Placement
+uses the existing log follower and makes no additional inference HTTP requests.
 
 ## Launch & manage llama-server
 

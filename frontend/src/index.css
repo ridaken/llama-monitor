@@ -143,7 +143,7 @@ button:disabled {
 }
 .monitor-decode,
 .monitor-slots,
-.monitor-gpus {
+.monitor-hardware {
   grid-column: 1 / -1;
 }
 .monitor-hero h2 {
@@ -281,11 +281,13 @@ button:disabled {
   margin-top: 12px;
 }
 .app-fit #slots,
-.app-fit #gpus > div {
+.app-fit .hardware-grid {
   gap: 8px;
 }
 .app-fit .monitor-slot,
-.app-fit .monitor-gpu {
+.app-fit .monitor-gpu,
+.app-fit .monitor-cpu,
+.app-fit .monitor-placement {
   min-width: 0;
   padding: 10px;
 }
@@ -318,34 +320,31 @@ button:disabled {
   .app-fit .monitor-telemetry {
     align-self: start;
     align-content: stretch;
-    min-height: max(595px, calc(100dvh - 264px));
-    grid-template-rows: minmax(165px, auto) minmax(180px, auto) minmax(
-        250px,
-        1fr
-      );
+    height: max(595px, calc(100dvh - 264px));
+    grid-template-rows: minmax(140px, auto) minmax(170px, auto) minmax(0, 1fr);
   }
   .monitor-decode,
-  .monitor-session,
-  .monitor-memory {
+  .monitor-session {
     grid-row: 1;
     grid-column: span 4;
   }
-  .monitor-throughput,
-  .monitor-split {
-    grid-row: 2;
-    grid-column: span 6;
+  .monitor-decode {
+    grid-column: span 8;
   }
+  .monitor-throughput,
+  .monitor-split,
   .monitor-slots {
-    grid-row: 3;
+    grid-row: 2;
     grid-column: span 4;
   }
-  .monitor-gpus {
+  .monitor-hardware {
     grid-row: 3;
-    grid-column: span 8;
+    grid-column: 1 / -1;
   }
   .app-fit .monitor-panel,
   .app-fit .monitor-decode,
   .app-fit .monitor-gpu,
+  .app-fit .monitor-cpu,
   .app-fit .monitor-slot {
     display: flex;
     flex-direction: column;
@@ -361,29 +360,61 @@ button:disabled {
     justify-content: space-between;
   }
   .app-fit .monitor-decode .monitor-spark,
-  .app-fit .monitor-memory .monitor-spark {
+  .app-fit .monitor-cpu .monitor-spark {
     margin-top: auto;
     margin-bottom: auto;
   }
-  .app-fit .monitor-memory #sysmem {
+  .app-fit .monitor-cpu #sysmem {
     display: flex;
-    height: 100%;
+    flex: 1;
     flex-direction: column;
   }
-  .app-fit #gpus,
-  .app-fit #gpus > div,
+  .app-fit .hardware-grid,
   .app-fit #slots {
     flex: 1;
   }
-  .app-fit #gpus,
-  .app-fit #gpus > div {
-    display: grid;
+  .app-fit .hardware-grid {
+    min-height: 0;
+    overflow-y: auto;
+    align-content: start;
+  }
+  .app-fit .monitor-hardware .monitor-spark {
+    height: 18px;
+  }
+  .app-fit .monitor-hardware .monitor-gpu,
+  .app-fit .monitor-hardware .monitor-cpu {
+    padding: 8px;
+  }
+  .app-fit .monitor-hardware .monitor-gpu > div:first-child {
+    margin-bottom: 4px;
+  }
+  .app-fit .monitor-decode {
+    padding: 12px 18px;
+  }
+  .app-fit .monitor-decode .monitor-spark {
+    height: 18px;
+  }
+  .app-fit .monitor-decode .metric {
+    font-size: 2rem;
+  }
+  .app-fit .monitor-throughput .monitor-row {
+    padding: 1px 0;
+  }
+  .app-fit .monitor-slot {
+    padding: 6px;
+  }
+  .app-fit .monitor-slot > div:first-child,
+  .app-fit .monitor-slot > p {
+    margin-bottom: 2px;
+  }
+  .app-fit .monitor-hardware .monitor-row {
+    padding: 3px 0;
+  }
+  .app-fit .monitor-cpu > strong {
+    margin-bottom: 4px;
   }
   .app-fit #slots {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .app-fit #gpus > div {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
   }
   .app-fit .monitor-gpu > .space-y-3 {
     display: flex;
@@ -485,11 +516,8 @@ button:disabled {
     font-size: 14px;
   }
   .app-fit .monitor-telemetry {
-    min-height: calc(100dvh - 320px);
-    grid-template-rows: minmax(210px, auto) minmax(220px, auto) minmax(
-        320px,
-        1fr
-      );
+    height: calc(100dvh - 320px);
+    grid-template-rows: minmax(210px, auto) minmax(220px, auto) minmax(0, 1fr);
   }
   .app-fit #slots {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -640,8 +668,13 @@ button:disabled {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-#gpus > div:has(> :only-child) {
+.hardware-grid:has(> :only-child) {
   grid-template-columns: 1fr;
+}
+@media (min-width: 768px) {
+  .hardware-grid:has(> :nth-child(2):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -651,4 +684,14 @@ button:disabled {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
+}
+
+.monitor-cpu #sysmem {
+  min-width: 0;
+}
+.layer-placement .monitor-row {
+  gap: 8px;
+}
+.layer-placement .monitor-row > span {
+  font-size: 12px;
 }

@@ -161,7 +161,7 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
     'aria-pressed',
     'true',
   )
-  await expect(page.locator('.monitor-panel')).toHaveCount(6)
+  await expect(page.locator('.monitor-panel')).toHaveCount(5)
   const panelBottom = await page
     .locator('.monitor-panel')
     .evaluateAll((panels) =>
@@ -181,7 +181,7 @@ test('Fit shows every Monitor panel in a 1440 × 900 viewport and Comfortable pe
         path: `test-results/monitor-fit-${width}.png`,
       })
     const bottom = await page
-      .locator('.monitor-gpus')
+      .locator('.monitor-hardware')
       .evaluate((panel) => panel.getBoundingClientRect().bottom)
     expect(bottom).toBeGreaterThan(height * 0.88)
     expect(bottom).toBeLessThanOrEqual(height)
@@ -285,7 +285,7 @@ test('Fit reflows a four-slot, three-GPU dashboard without horizontal overflow',
     await expect(page.locator('.monitor-slot')).toHaveCount(4)
     await expect(page.locator('#status')).toContainText('llama-server online')
     const panelBottom = await page
-      .locator('.monitor-gpus')
+      .locator('.monitor-hardware')
       .evaluate((panel) => panel.getBoundingClientRect().bottom)
     expect(panelBottom).toBeLessThanOrEqual(height)
     expect(
