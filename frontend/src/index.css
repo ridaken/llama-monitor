@@ -705,7 +705,10 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 .monitor-gpu-trend {
-  grid-template-columns: 48px minmax(0, 1fr) minmax(70px, max-content);
+  grid-template-columns: minmax(48px, max-content) minmax(0, 1fr) minmax(
+      70px,
+      max-content
+    );
 }
 /* Use the section's content width so neighboring dashboard tiles can reduce
    the column count without requiring a viewport resize. */

@@ -197,6 +197,32 @@ for (const mode of ['Fit', 'Comfortable']) {
   })
 }
 
+test('Fit trend labels and values fit with wider fonts at large density', async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.setViewportSize({ width: 2560, height: 1440 })
+  await page.goto('/')
+  await expect(page.locator('.monitor-gpu')).toHaveCount(1)
+  // Fit can grow text to 21.6px; Arial also exercises wider glyphs than the
+  // Windows system font used by local browser tests.
+  await page.addStyleTag({
+    content:
+      '.monitor-gpu-trend { font: 21.6px Arial, sans-serif !important; }',
+  })
+  const overflows = await page
+    .locator('.monitor-gpu-trend > span')
+    .evaluateAll((spans) =>
+      spans
+        .filter((span) => span.scrollWidth > span.clientWidth + 1)
+        .map(
+          (span) =>
+            `${span.textContent}: ${span.scrollWidth} > ${span.clientWidth}`,
+        ),
+    )
+  expect(overflows).toEqual([])
+})
+
 test('Hardware preserves 60-sample histories when cards reflow', async ({
   page,
 }) => {
