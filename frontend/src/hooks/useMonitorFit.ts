@@ -7,6 +7,7 @@ export function useMonitorFit() {
   useLayoutEffect(() => {
     const root = ref.current!
     const shell = root.closest('.app-shell')!
+    const header = shell.querySelector('header')!
     const view = root.closest('.monitor-view')!
     const body = root.closest('.app-body')!
     const footer = body.querySelector('footer')!
@@ -101,7 +102,7 @@ export function useMonitorFit() {
       schedule()
     }
     const resize = new ResizeObserver(schedule)
-    for (const el of [root, footer, ...sections]) resize.observe(el)
+    for (const el of [header, root, footer, ...sections]) resize.observe(el)
     const mutations = new MutationObserver(invalidate)
     mutations.observe(root, { childList: true, subtree: true })
     const visibility = new MutationObserver(invalidate)
