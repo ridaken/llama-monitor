@@ -516,10 +516,7 @@ export function Monitor({
             }
             className="monitor-hardware"
           >
-            <div
-              id="gpus"
-              className="hardware-grid grid gap-4 md:grid-cols-2 xl:grid-cols-3"
-            >
+            <div id="gpus" className="hardware-grid grid gap-4">
               <div className="monitor-cpu rounded-xl border border-border/70 bg-background/30 p-4">
                 <strong className="mb-3 block">
                   {d?.runtime?.containerized ? 'CPU & Docker RAM' : 'CPU & RAM'}
@@ -578,7 +575,10 @@ export function Monitor({
                       <strong>
                         GPU {device.index} · {device.name || 'GPU'}
                       </strong>
-                      <Badge variant="secondary">
+                      <Badge
+                        variant="secondary"
+                        className="shrink-0 whitespace-nowrap"
+                      >
                         {fmt(device.power, 0)} W
                       </Badge>
                     </div>
@@ -614,7 +614,7 @@ export function Monitor({
                       ).map(([label, key, value, max, color, unit]) => (
                         <div
                           key={key}
-                          className="grid grid-cols-[48px_1fr_70px] items-center gap-2 text-xs"
+                          className="monitor-gpu-trend grid items-center gap-2 text-xs"
                         >
                           <span className="text-muted-foreground">{label}</span>
                           <Spark
@@ -655,27 +655,37 @@ export function Monitor({
                 </div>
               ))}
             </div>
-            {placement?.reason && (
-              <p
-                id="placement-note"
-                className="mt-3 text-xs text-muted-foreground"
-              >
-                {placement.reason}
-              </p>
+            {(placement?.reason ||
+              !d?.gpu?.ok ||
+              !!d?.gpu?.devices?.length) && (
+              <div className="monitor-hardware-footer mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                {(placement?.reason || !d?.gpu?.ok) && (
+                  <div className="min-w-0 flex-1 basis-48 space-y-1 [overflow-wrap:anywhere]">
+                    {placement?.reason && (
+                      <p id="placement-note">{placement.reason}</p>
+                    )}
+                    {!d?.gpu?.ok && (
+                      <p id="gpu-error">{d?.gpu?.error || 'No GPU data.'}</p>
+                    )}
+                  </div>
+                )}
+                {!!d?.gpu?.devices?.length && (
+                  <p
+                    id="gpu-total-w"
+                    className="ml-auto shrink-0 whitespace-nowrap text-right"
+                  >
+                    Total draw{' '}
+                    {fmt(
+                      d.gpu.devices.reduce(
+                        (sum, device) => sum + (device.power || 0),
+                        0,
+                      ),
+                    )}{' '}
+                    W
+                  </p>
+                )}
+              </div>
             )}
-            {!d?.gpu?.ok && (
-              <p id="gpu-error" className="mt-3 text-xs text-muted-foreground">
-                {d?.gpu?.error || 'No GPU data.'}
-              </p>
-            )}
-            <div
-              id="gpu-total-w"
-              className="mt-4 text-right text-sm text-muted-foreground"
-            >
-              {d?.gpu?.devices?.length
-                ? `Total draw ${fmt(d.gpu.devices.reduce((sum, device) => sum + (device.power || 0), 0))} W`
-                : ''}
-            </div>
           </Panel>
         </div>
       </div>

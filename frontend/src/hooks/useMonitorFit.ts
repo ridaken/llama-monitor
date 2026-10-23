@@ -10,7 +10,6 @@ export function useMonitorFit() {
     const header = shell.querySelector('header')!
     const view = root.closest('.monitor-view')!
     const body = root.closest('.app-body')!
-    const footer = body.querySelector('footer')!
     const sections = Array.from(
       root.querySelectorAll<HTMLElement>(
         '.monitor-controls, .monitor-telemetry',
@@ -45,11 +44,7 @@ export function useMonitorFit() {
       for (const section of sections)
         section.style.setProperty('--monitor-growth', '0px')
       const bottom =
-        innerHeight -
-        footer.getBoundingClientRect().height -
-        parseFloat(getComputedStyle(footer).marginTop) -
-        parseFloat(getComputedStyle(body).paddingBottom) -
-        2
+        innerHeight - parseFloat(getComputedStyle(body).paddingBottom) - 2
       let telemetryGrowth = 0
       for (const section of [...sections].reverse()) {
         const setGrowth = (value: number) =>
@@ -102,7 +97,7 @@ export function useMonitorFit() {
       schedule()
     }
     const resize = new ResizeObserver(schedule)
-    for (const el of [header, root, footer, ...sections]) resize.observe(el)
+    for (const el of [header, root, ...sections]) resize.observe(el)
     const mutations = new MutationObserver(invalidate)
     mutations.observe(root, { childList: true, subtree: true })
     const visibility = new MutationObserver(invalidate)

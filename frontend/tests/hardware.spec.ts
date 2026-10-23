@@ -1,6 +1,342 @@
 import { expect, test } from '@playwright/test'
 import { mockApi, stats } from './fixtures'
 
+const gpuNames = [
+  'NVIDIA GeForce RTX 4070 SUPER',
+  'NVIDIA GeForce RTX 3060 Ti',
+  'NVIDIA GeForce RTX 5060 Ti',
+]
+const hardwareStats = (count: number) => ({
+  ...stats,
+  gpu: {
+    ...stats.gpu,
+    devices: Array.from({ length: count - 1 }, (_, index) => ({
+      ...stats.gpu.devices[0],
+      index,
+      name: gpuNames[index % gpuNames.length],
+    })),
+  },
+})
+
+for (const mode of ['Fit', 'Comfortable']) {
+  for (const count of [1, 2, 3, 4, 5, 6]) {
+    test(`${mode} Hardware lays out ${count} cards using available section width`, async ({
+      page,
+    }) => {
+      await mockApi(page, { 'GET /api/stats': () => hardwareStats(count) })
+      await page.setViewportSize({ width: 2560, height: 1440 })
+      await page.goto('/')
+      await page.getByRole('button', { name: mode, exact: true }).click()
+      const grid = page.locator('.hardware-grid')
+      await expect(grid.locator(':scope > *')).toHaveCount(count)
+      const measure = () =>
+        grid.evaluate((el) => {
+          const cards = Array.from(el.children).map((card) =>
+            card.getBoundingClientRect(),
+          )
+          return {
+            columns: cards.filter(
+              (card) => Math.abs(card.top - cards[0].top) < 1,
+            ).length,
+            rows: new Set(cards.map((card) => Math.round(card.top))).size,
+            equalWidths: cards.every(
+              (card) => Math.abs(card.width - cards[0].width) < 1,
+            ),
+            fits: Array.from(el.querySelectorAll<HTMLElement>('*')).every(
+              (child) => child.scrollWidth <= child.clientWidth + 1,
+            ),
+            pageFits: document.documentElement.scrollWidth <= innerWidth + 1,
+          }
+        })
+      await expect
+        .poll(async () => (await measure()).columns)
+        .toBe(Math.min(4, count))
+      expect((await measure()).rows).toBe(Math.ceil(count / 4))
+      expect((await measure()).equalWidths).toBe(true)
+      expect((await measure()).fits).toBe(true)
+      if (count === 4 && process.env.CAPTURE_UI === '1')
+        await page.locator('.monitor-hardware').screenshot({
+          path: `test-results/hardware-four-${mode}.png`,
+        })
+
+      // Change only the section width, as if another dashboard tile took space.
+      // Zero the content's horizontal padding to exercise exact content widths.
+      await page
+        .locator('.monitor-hardware .monitor-panel-content')
+        .evaluate((el) => {
+          ;(el as HTMLElement).style.paddingInline = '0px'
+        })
+      for (const [width, columns] of [
+        [1328, 4],
+        [1327, 3],
+        [992, 3],
+        [991, 2],
+        [656, 2],
+        [655, 1],
+        [656, 2],
+        [992, 3],
+        [1328, 4],
+      ]) {
+        await page.locator('.monitor-hardware').evaluate((el, width) => {
+          ;(el as HTMLElement).style.width = `${width + 2}px`
+        }, width)
+        await expect
+          .poll(async () => (await measure()).columns)
+          .toBe(Math.min(columns, count))
+        expect((await measure()).equalWidths).toBe(true)
+        expect((await measure()).fits).toBe(true)
+      }
+      await page
+        .locator('.monitor-hardware, .monitor-hardware .monitor-panel-content')
+        .evaluateAll((elements) =>
+          elements.forEach((el) => el.removeAttribute('style')),
+        )
+      for (const width of [1440, 390, 320]) {
+        await page.setViewportSize({ width, height: 900 })
+        await expect.poll(async () => (await measure()).pageFits).toBe(true)
+        expect((await measure()).fits).toBe(true)
+        if (width === 320) expect((await measure()).columns).toBe(1)
+      }
+    })
+  }
+
+  test(`${mode} Hardware wraps long names and includes unmatched accelerators`, async ({
+    page,
+  }) => {
+    await mockApi(page, {
+      'GET /api/stats': () => ({
+        ...hardwareStats(3),
+        layer_placement: {
+          ...stats.layer_placement,
+          devices: [
+            ...stats.layer_placement.devices,
+            { label: 'VULKAN0', name: 'Unmatched accelerator', layers: 0 },
+          ],
+        },
+        gpu: {
+          ...stats.gpu,
+          devices: hardwareStats(3).gpu.devices.map((device) => ({
+            ...device,
+            name: 'AnExtremelyLongUnbrokenAcceleratorName'.repeat(3),
+            power: 1234,
+          })),
+        },
+      }),
+    })
+    await page.setViewportSize({ width: 2560, height: 1440 })
+    await page.goto('/')
+    await page.getByRole('button', { name: mode, exact: true }).click()
+    await expect(page.locator('.monitor-placement')).toContainText('VULKAN0')
+    for (const width of [2560, 1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 1440 })
+      await expect
+        .poll(() =>
+          page.locator('.hardware-grid').evaluate((el) => {
+            const cards = Array.from(el.children)
+            return (
+              cards.every((card) =>
+                Array.from(card.querySelectorAll<HTMLElement>('*')).every(
+                  (child) => child.scrollWidth <= child.clientWidth + 1,
+                ),
+              ) && document.documentElement.scrollWidth <= innerWidth + 1
+            )
+          }),
+        )
+        .toBe(true)
+      for (const badge of await page
+        .locator('.monitor-gpu > div:first-child > div')
+        .all()) {
+        await expect(badge).toHaveText('1234 W')
+        expect(
+          await badge.evaluate((el) => getComputedStyle(el).whiteSpace),
+        ).toBe('nowrap')
+      }
+      if (width === 2560) {
+        const tops = await page
+          .locator('.hardware-grid > *')
+          .evaluateAll((cards) =>
+            cards.map((card) => card.getBoundingClientRect().top),
+          )
+        expect(Math.max(...tops) - Math.min(...tops)).toBeLessThan(1)
+      }
+    }
+  })
+
+  test(`${mode} Hardware keeps four unloaded devices inline`, async ({
+    page,
+  }) => {
+    await mockApi(page, {
+      'GET /api/stats': () => ({
+        ...hardwareStats(4),
+        layer_placement: {
+          status: 'no_model',
+          devices: [],
+          reason: 'No model loaded',
+        },
+      }),
+    })
+    await page.setViewportSize({ width: 2560, height: 1440 })
+    await page.goto('/')
+    await page.getByRole('button', { name: mode, exact: true }).click()
+    await expect(page.locator('.layer-placement')).toHaveCount(4)
+    await expect(page.locator('.layer-placement')).toContainText(
+      Array(4).fill('No model loaded'),
+    )
+    const footer = page.locator('.monitor-hardware-footer')
+    const alignment = await footer.evaluate((el) => {
+      const note = el.querySelector('#placement-note')!
+      const total = el.querySelector('#gpu-total-w')!
+      return {
+        offset: Math.abs(
+          note.getBoundingClientRect().top - total.getBoundingClientRect().top,
+        ),
+        noteSize: getComputedStyle(note).fontSize,
+        totalSize: getComputedStyle(total).fontSize,
+      }
+    })
+    expect(alignment.offset).toBeLessThan(1)
+    expect(alignment.noteSize).toBe(alignment.totalSize)
+    await expect
+      .poll(() =>
+        page.locator('.hardware-grid > *').evaluateAll((cards) => {
+          const tops = cards.map((card) => card.getBoundingClientRect().top)
+          return Math.max(...tops) - Math.min(...tops)
+        }),
+      )
+      .toBeLessThan(1)
+    if (process.env.CAPTURE_UI === '1')
+      await page
+        .locator('.monitor-hardware')
+        .screenshot({ path: `test-results/hardware-unloaded-${mode}.png` })
+    await page.setViewportSize({ width: 320, height: 900 })
+    await expect
+      .poll(() =>
+        footer.evaluate((el) => {
+          const total = el
+            .querySelector('#gpu-total-w')!
+            .getBoundingClientRect()
+          const note = el
+            .querySelector('#placement-note')!
+            .getBoundingClientRect()
+          return (
+            el.scrollWidth <= el.clientWidth + 1 && total.top >= note.bottom - 1
+          )
+        }),
+      )
+      .toBe(true)
+  })
+}
+
+test('Fit trend labels and values fit with wider fonts at large density', async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.setViewportSize({ width: 2560, height: 1440 })
+  await page.goto('/')
+  await expect(page.locator('.monitor-gpu')).toHaveCount(1)
+  // Fit can grow text to 21.6px; Arial also exercises wider glyphs than the
+  // Windows system font used by local browser tests.
+  await page.addStyleTag({
+    content:
+      '.monitor-gpu-trend { font: 21.6px Arial, sans-serif !important; }',
+  })
+  const overflows = await page
+    .locator('.monitor-gpu-trend > span')
+    .evaluateAll((spans) =>
+      spans
+        .filter((span) => span.scrollWidth > span.clientWidth + 1)
+        .map(
+          (span) =>
+            `${span.textContent}: ${span.scrollWidth} > ${span.clientWidth}`,
+        ),
+    )
+  expect(overflows).toEqual([])
+})
+
+test('Hardware preserves 60-sample histories when cards reflow', async ({
+  page,
+}) => {
+  test.setTimeout(60_000)
+  await page.clock.install()
+  let loaded = true
+  let sample = 0
+  await mockApi(page, {
+    'GET /api/stats': () => {
+      const data = hardwareStats(4)
+      sample++
+      return {
+        ...data,
+        layer_placement: loaded
+          ? {
+              ...stats.layer_placement,
+              devices: [
+                { label: 'CPU', layers: 0 },
+                ...[0, 1, 2].map((index) => ({
+                  label: `CUDA${index}`,
+                  gpu_index: index,
+                  layers: 16,
+                })),
+              ],
+            }
+          : { status: 'no_model', devices: [], reason: 'No model loaded' },
+        gpu: {
+          ...data.gpu,
+          devices: data.gpu.devices.map((device) => ({
+            ...device,
+            temp: 40 + (sample % 5),
+            util_gpu: (sample % 7) * 10,
+            power: 30 + (sample % 7) * 20,
+          })),
+        },
+      }
+    },
+  })
+  await page.setViewportSize({ width: 2560, height: 1440 })
+  await page.goto('/')
+  const historyLength = () =>
+    page
+      .locator('.monitor-gpu svg')
+      .first()
+      .evaluate(
+        (el) =>
+          el
+            .querySelector('polyline')
+            ?.getAttribute('points')
+            ?.trim()
+            .split(/\s+/).length ?? 1,
+      )
+  await expect(page.locator('.monitor-gpu')).toHaveCount(3)
+  for (let count = 2; count <= 60; count++) {
+    await page.clock.fastForward(1100)
+    await expect.poll(historyLength).toBeGreaterThanOrEqual(count)
+  }
+  for (const state of ['loaded', 'unloaded']) {
+    loaded = state === 'loaded'
+    await page.clock.fastForward(1100)
+    if (!loaded)
+      await expect(page.locator('.layer-placement')).toContainText(
+        Array(4).fill('No model loaded'),
+      )
+    for (const mode of ['Fit', 'Comfortable']) {
+      await page.getByRole('button', { name: mode, exact: true }).click()
+      if (process.env.CAPTURE_UI === '1')
+        await page.locator('.monitor-hardware').screenshot({
+          path: `test-results/hardware-history-${state}-${mode}.png`,
+        })
+      await page.setViewportSize({ width: 390, height: 900 })
+      expect(await historyLength()).toBe(60)
+      expect(
+        await page
+          .locator('.monitor-gpu svg')
+          .first()
+          .evaluate((el) => el.getBoundingClientRect().width),
+      ).toBeGreaterThan(0)
+      await page.setViewportSize({ width: 2560, height: 1440 })
+      expect(await historyLength()).toBe(60)
+    }
+  }
+})
+
 test('Fit redistributes spare height into text, padding, and charts on live resize', async ({
   page,
 }) => {
@@ -59,7 +395,7 @@ test('Fit redistributes spare height into text, padding, and charts on live resi
     .toBeLessThanOrEqual(900)
 })
 
-test('Fit reserves room for extra hardware instead of retaining the previous larger density', async ({
+test('Fit refits when the hardware count changes at runtime', async ({
   page,
 }) => {
   let gpuCount = 1
@@ -78,15 +414,15 @@ test('Fit reserves room for extra hardware instead of retaining the previous lar
   await page.setViewportSize({ width: 1920, height: 1200 })
   await page.goto('/')
   await expect(page.locator('.monitor-gpu')).toHaveCount(1)
-  const font = () =>
-    page
-      .locator('.monitor-gpu .monitor-row > span')
-      .first()
-      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
-  const singleGpuFont = await font()
   gpuCount = 3
   await expect(page.locator('.monitor-gpu')).toHaveCount(3)
-  await expect.poll(font).toBeLessThan(singleGpuFont)
+  await expect
+    .poll(() =>
+      page
+        .locator('.hardware-grid')
+        .evaluate((el) => el.scrollHeight <= el.clientHeight + 1),
+    )
+    .toBe(true)
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollHeight))
     .toBeLessThanOrEqual(1200)
@@ -221,6 +557,7 @@ test('CPU-only placement and Docker RAM remain available without NVML', async ({
   await expect(page.locator('.monitor-cpu')).toContainText('Assigned here')
   await expect(page.locator('.monitor-gpu')).toHaveCount(0)
   await expect(page.locator('#gpu-error')).toContainText('NVML unavailable')
+  await expect(page.locator('#gpu-total-w')).toHaveCount(0)
 })
 
 test('remapped identities and unmatched accelerators retain their own placement cards', async ({

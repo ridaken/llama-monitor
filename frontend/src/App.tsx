@@ -217,10 +217,6 @@ export default function App() {
           </div>
         </main>
         <LauncherDialogs launcher={launcher} />
-        <footer className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 pt-3 text-xs text-muted-foreground">
-          <span>Local llama-server monitoring</span>
-          <span>Data stays on this machine</span>
-        </footer>
       </div>
     </div>
   )
