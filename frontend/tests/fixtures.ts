@@ -101,7 +101,7 @@ export const stats = {
     total: { tokens: 92, secs: 0.8 },
   },
   split: [
-    { label: 'CUDA0', bytes: 10737418240, kind: 'gpu' },
+    { label: 'CUDA0', bytes: 10737418240, kind: 'gpu', gpu_index: 0 },
     { label: 'CPU', bytes: 2147483648, kind: 'cpu' },
   ],
   split_source: 'log',

@@ -11,16 +11,16 @@ live (1s refresh):
   `tokens / n_ctx (percent)`
 - **Throughput** — prompt (pp) and decode tokens/sec, with a 60s smoothed decode
   sparkline (with Y-axis), speculative-decode efficiency, and last-prefill timing
-- **Model memory** — per-device model memory, with its source shown. Logged
-  totals include weights, context and work buffers (CPU includes mapped files
-  and pinned RAM); they are allocation sizes, not live physical usage. The bar
-  shows shares of the reported total, not GPU capacity. Use Hardware for current
-  VRAM usage across all processes.
 - **Slots** — per-slot state (idle / prefill / generating), context fill, prompt
   length and tokens generated
 - **Hardware** — a CPU & RAM card and individual GPU cards, with primary model
   layer assignments and separate output-layer placement. Includes RAM usage and
   trend, llama-server RSS, per-GPU temp/util/power trends, VRAM, and total GPU draw.
+  Teal marks llama-server memory; when NVML measures its VRAM, the capacity bar
+  shows teal for llama-server and orange for other usage. Logged weights,
+  context and work buffers are a separate labeled row, since they do not measure
+  live residency. CPU buffers include mapped files and pinned RAM. Devices
+  without a confirmed hardware identity retain their own labeled card.
   Docker RAM describes the container/VM, not Windows host RAM.
 - **Activity history** — sortable, filterable generations observed in the log,
   retained in local SQLite until you clear them

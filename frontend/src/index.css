@@ -277,8 +277,20 @@ button:disabled {
 .app-fit .monitor-decode > p:first-child {
   margin-bottom: 8px;
 }
-.app-fit #split-legend {
-  margin-top: 12px;
+.model-memory .monitor-row > span:last-child {
+  color: #56c5a8;
+}
+.model-memory .monitor-row > span:first-child::before {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 2px;
+  background: #56c5a8;
+  content: '';
+}
+.vram-model {
+  background: #56c5a8;
 }
 .app-fit #slots,
 .app-fit .hardware-grid {
@@ -334,10 +346,12 @@ button:disabled {
     grid-column: span 8;
   }
   .monitor-throughput,
-  .monitor-split,
   .monitor-slots {
     grid-row: 2;
     grid-column: span 4;
+  }
+  .monitor-slots {
+    grid-column: span 8;
   }
   .monitor-hardware {
     grid-row: 3;

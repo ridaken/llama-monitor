@@ -136,7 +136,12 @@ export type Stats = {
     accept_rate?: number | null
   }
   last_request?: { pp?: Timing; generation?: Timing; total?: Timing }
-  split?: Array<{ label: string; bytes: number; kind: string }>
+  split?: Array<{
+    label: string
+    bytes: number
+    kind: string
+    gpu_index?: number
+  }>
   split_source?: string | null
   split_log_configured?: boolean
   gpu?: {
