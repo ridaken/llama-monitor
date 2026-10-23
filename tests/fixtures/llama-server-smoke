@@ -13,10 +13,18 @@ parser.add_argument("--port", type=int)
 parser.add_argument("--log-file")
 args, _ = parser.parse_known_args()
 log = Path(args.log_file)
-log.write_text("print_info: n_layer = 2\n"
+log.write_text("common_init: fitting params to device memory ...\n"
+               "print_info: n_layer = 1\n"
+               "load_tensors: layer 0 assigned to device CUDA9\n"
+               "load_tensors: layer 1 assigned to device CUDA9\n"
+               "common_params_fit_impl: id=0, n_layer=1, n_part=0\n"
+               "common_fit_params: fitting params to free memory took 0.1 seconds\n"
+               "print_info: n_layer = 2\n"
+               "print_info: n_layer_all = 3\n"
                "load_tensors: layer 0 assigned to device CPU, is_swa = 0\n"
                "load_tensors: layer 1 assigned to device CPU, is_swa = 0\n"
                "load_tensors: layer 2 assigned to device CPU, is_swa = 0\n"
+               "load_tensors: layer 3 assigned to device CPU, is_swa = 0\n"
                "load_tensors: CPU model buffer size = 1.00 MiB\n")
 
 

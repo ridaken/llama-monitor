@@ -24,6 +24,91 @@ def parse(text):
     return parser
 
 
+def fit_mtp_log():
+    # Same-file, no-allocation loads are emitted repeatedly by --fit. MTP is
+    # included in n_layer_all, but excluded from the target's n_layer count.
+    return ("cmn common_params_print_info: build 11804 (test)\n"
+            "cmn common_init_: fitting params to device memory ...\n"
+            + model_log(("CUDA1",) * 3) * 2
+            + "common_params_fit_impl: id=0, n_layer=0, n_part=0\n"
+            "common_fit_params: fitting params to free memory took 1.0 seconds\n"
+            + model_log(output=None).replace("print_info: n_layer = 3\n",
+                                            "print_info: n_layer = 3\nprint_info: n_layer_all = 5\n")
+            + "load_tensors: layer 3 assigned to device CUDA0\n"
+            "load_tensors: layer 4 assigned to device CPU\n"
+            "load_tensors: layer 5 assigned to device CUDA1\n"
+            "common_speculative_init_result: creating MTP draft context against the target model 'main.gguf'\n")
+
+
+def test_fit_trials_and_fit_diagnostics_are_not_model_loads():
+    parser = parse(fit_mtp_log())
+    result = parser.snapshot("main.gguf")
+    assert result["status"] == "available"
+    assert result["total_layers"] == 3
+    assert result["output_device"] == "CUDA1"
+    assert {d["label"]: d["layers"] for d in result["devices"]} == {"CPU": 1, "CUDA0": 1, "CUDA1": 1}
+    parser.feed("common_params_fit_impl: id=0, n_layer=99, n_part=0")
+    assert parser.snapshot("main.gguf") == result
+
+
+def test_fit_without_real_load_never_publishes_trial_counts():
+    parser = parse("fitting params to device memory ...\n" + model_log())
+    assert parser.snapshot()["status"] == "unavailable"
+    parser.feed("fitting params to free memory took 1.0 seconds")
+    assert parser.snapshot()["status"] == "unavailable"
+    parser.feed(model_log())
+    assert parser.snapshot()["status"] == "available"
+    parser.feed("cmn common_param: common_params_print_info: build 11804 (new process)")
+    assert parser.snapshot()["status"] == "unavailable"
+    assert not parser.fitting
+
+
+@pytest.mark.parametrize("prefix", ["print_info", "llama_model_print_info", "llm_load_print_meta"])
+def test_supported_model_info_prefixes(prefix):
+    assert parse(model_log().replace("print_info:", prefix + ":")).snapshot()["status"] == "available"
+
+
+@pytest.mark.parametrize("total_all", [0, 2])
+def test_mtp_all_layers_cannot_be_smaller_than_main_layers(total_all):
+    assert parse(fit_mtp_log().replace("n_layer_all = 5", f"n_layer_all = {total_all}")).snapshot()["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("replacement,output,status", [
+    ("load_tensors: layer 5 assigned to device CUDA1\n", None, "available"),
+    ("load_tensors: layer   1 assigned to device CUDA0, is_swa = 0\n", None, "unavailable"),
+    ("print_info: n_layer_all = 5", None, "unavailable"),
+])
+def test_mtp_missing_output_main_assignment_or_total(replacement, output, status):
+    result = parse(fit_mtp_log().replace(replacement, "")).snapshot("main.gguf")
+    assert result["status"] == status
+    assert result.get("output_device") == output
+
+
+@pytest.mark.parametrize("jsonl", [False, True])
+def test_fit_mtp_follower_recovery_and_transaction_rollback(tmp_path, monkeypatch, jsonl):
+    path = tmp_path / "server.log"
+    path.write_text("", encoding="utf-8")
+    db = HistoryDB(str(tmp_path / "history.sqlite"))
+    follower = LogFollower(db, str(path), managed=True, run_id="run")
+    log = fit_mtp_log()
+    # Include a multi-line JSON message as emitted by some logging wrappers.
+    path.write_text(json.dumps({"type": "log", "msg": log}) + "\n" if jsonl else log, encoding="utf-8")
+    save = db.save_batch
+    def fail(*args, **kwargs):
+        raise RuntimeError("write failed")
+    monkeypatch.setattr(db, "save_batch", fail)
+    with pytest.raises(RuntimeError):
+        follower.poll()
+    assert not follower.placement.fitting
+    assert not follower.placement.blocks
+    monkeypatch.setattr(db, "save_batch", save)
+    follower.poll()
+    result = follower.snapshot()["layer_parser"].snapshot("main.gguf")
+    assert result["status"] == "available" and result["total_layers"] == 3
+    resumed = LogFollower(db, str(path), managed=True, run_id="run")
+    assert resumed.snapshot()["layer_parser"].snapshot("main.gguf") == result
+
+
 @pytest.mark.parametrize("labels", [("CPU",) * 3, ("CUDA0",) * 3, ("CPU", "CUDA0", "CUDA1")])
 def test_complete_assignments_exclude_output_and_confirm_zero(labels):
     parser = parse(model_log(labels))
