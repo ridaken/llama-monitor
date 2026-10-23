@@ -29,8 +29,8 @@ const splitColors = [
   '#66c4d4',
 ]
 const sourceNote: Record<string, string> = {
-  nvml: 'Exact per-process VRAM from NVML',
-  log: 'From llama-server load log',
+  nvml: 'Live llama-server VRAM from NVML; excludes CPU RAM.',
+  log: 'Logged model, context and work buffers; not live usage. See Hardware for current VRAM.',
   'nvml-delta':
     'Approximate VRAM change since model load; other apps can affect it',
 }
@@ -260,6 +260,13 @@ export function Monitor({
         : 'MTP on · idle'
   const split = d?.split || []
   const splitTotal = split.reduce((sum, item) => sum + item.bytes, 0)
+  const oversized =
+    d?.split_source === 'log' &&
+    split.some((item) => {
+      const index = /^CUDA(\d+)$/.exec(item.label)?.[1]
+      const gpu = d?.gpu?.devices?.find((device) => `${device.index}` === index)
+      return gpu?.mem_total != null && item.bytes > gpu.mem_total
+    })
   const placement = d?.layer_placement
   const unmatched =
     placement?.devices.filter(
@@ -400,9 +407,9 @@ export function Monitor({
             />
           </Panel>
           <Panel
-            title="Memory split"
+            title="Model memory"
             icon={Boxes}
-            info="Estimated model footprint by device; the source note explains accuracy."
+            info="The bar shows each device's share of the reported model memory, not how full its VRAM is. Logged sizes include weights, KV cache and work buffers; CPU includes mapped files and pinned RAM, which may not all be resident. CUDA labels are llama-server device IDs. Hardware below shows current device usage across all processes."
             className="monitor-split"
           >
             <div
@@ -450,6 +457,12 @@ export function Monitor({
             <p id="split-note" className="mt-3 text-xs text-muted-foreground">
               {sourceNote[d?.split_source || ''] || ''}
             </p>
+            {oversized && (
+              <p className="mt-2 text-xs text-amber-400" role="status">
+                Logged allocations exceed a GPU’s capacity. These totals do not
+                represent resident VRAM.
+              </p>
+            )}
           </Panel>
           <Panel
             title="Slots"

@@ -11,8 +11,11 @@ live (1s refresh):
   `tokens / n_ctx (percent)`
 - **Throughput** — prompt (pp) and decode tokens/sec, with a 60s smoothed decode
   sparkline (with Y-axis), speculative-decode efficiency, and last-prefill timing
-- **Memory split** — how the model is divided across GPUs
-  (e.g. `CUDA0: 10.0 GB · CUDA1: 12.0 GB`)
+- **Model memory** — per-device model memory, with its source shown. Logged
+  totals include weights, context and work buffers (CPU includes mapped files
+  and pinned RAM); they are allocation sizes, not live physical usage. The bar
+  shows shares of the reported total, not GPU capacity. Use Hardware for current
+  VRAM usage across all processes.
 - **Slots** — per-slot state (idle / prefill / generating), context fill, prompt
   length and tokens generated
 - **Hardware** — a CPU & RAM card and individual GPU cards, with primary model

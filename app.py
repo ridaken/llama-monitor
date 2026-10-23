@@ -441,7 +441,7 @@ def build_app(args) -> FastAPI:
 
         # Build the memory-split view, best source first:
         #   1. NVML per-process VRAM       — exact (Linux / TCC drivers only)
-        #   2. log buffer-size lines       — exact (builds that print them)
+        #   2. log buffer-size lines       — allocations, not physical residency
         #   3. NVML delta vs log baseline  — live approximation (Windows/WDDM)
         split = []
         source = None
