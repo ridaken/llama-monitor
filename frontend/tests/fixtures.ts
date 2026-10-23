@@ -53,6 +53,16 @@ export const startupState = {
 }
 
 export const stats = {
+  layer_placement: {
+    status: 'available',
+    total_layers: 48,
+    output_device: 'CUDA0',
+    reason: null,
+    devices: [
+      { label: 'CPU', layers: 8 },
+      { label: 'CUDA0', layers: 40, gpu_index: 0 },
+    ],
+  },
   online: true,
   active: true,
   log_mode: true,

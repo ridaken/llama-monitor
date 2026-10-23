@@ -295,3 +295,30 @@ def test_adopted_server_exposes_actual_prompt_logging_config(monkeypatch, tmp_pa
         body = c.get("/api/launcher/state").json()
     assert body["status"]["config"] == running["config"]
     assert body["configs"][0]["log_prompts"] is False
+
+
+@pytest.mark.parametrize("state,online,expected", [("running", True, "available"), ("running", False, "loading"), ("stopped", True, "no_model"), ("exited", True, "no_model")])
+def test_layer_placement_stats_and_idle_polling(client, monkeypatch, state, online, expected):
+    from history import LogFollower
+    from placement import LayerPlacement
+    parser = LayerPlacement()
+    for msg in ["print_info: n_layer = 1", "load_tensors: layer 0 assigned to device CPU",
+                "load_tensors: layer 1 assigned to device CPU"]:
+        parser.feed(msg)
+    original = LogFollower.snapshot
+    monkeypatch.setattr(LogFollower, "snapshot", lambda self: {
+        **original(self), "managed": True, "available": True, "layer_parser": parser})
+    monkeypatch.setattr(launcher.ServerManager, "status", lambda self: {"state": state, "config": {"model_path": "m.gguf"}})
+    monkeypatch.setattr(app_module.GpuCollector, "collect", lambda self, pids: {"ok": False})
+    levels = []
+    def collect(self, level):
+        levels.append(level)
+        return {"online": online}
+    monkeypatch.setattr(app_module.LlamaCollector, "collect", collect)
+    result = client.get("/api/stats?lite=1").json()["layer_placement"]
+    assert result["status"] == expected
+    assert levels == ["none"]
+    if expected == "available":
+        assert result["total_layers"] == 1 and result["devices"] == [{"label": "CPU", "layers": 1}]
+    else:
+        assert result["devices"] == []

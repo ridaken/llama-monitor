@@ -41,6 +41,7 @@ from collectors import (
 )
 from history import HistoryDB, LogFollower, decode_log_line
 from launcher import LaunchError, ServerManager, configured_model_name, resolve_binary, startup_log_path
+from placement import placement_response
 from diagnostics import doctor
 from gaming import GamingCoordinator
 from apollo import ApolloClient, certificate_fingerprint, parse_url, protect, unprotect
@@ -464,6 +465,16 @@ def build_app(args) -> FastAPI:
         data["split"] = split
         data["split_source"] = source
         data["split_log_configured"] = bool(log_path)
+        snapshot = follower.snapshot()
+        managed = manager.status() if snapshot["managed"] else None
+        data["layer_placement"] = placement_response(
+            snapshot["layer_parser"], gpu_data, online=bool(data.get("online")),
+            managed_state=managed["state"] if managed else None,
+            model_path=(managed.get("config") or {}).get("model_path") if managed else
+                       (data.get("model") or {}).get("path"),
+            config=managed.get("config") if managed else None)
+        if not snapshot["available"] and data["layer_placement"]["status"] in ("available", "shared"):
+            data["layer_placement"] = {"status": "unavailable", "reason": "Startup log is unavailable.", "devices": []}
 
         # Idle-time MTP detection from the log complements the collector's latch
         # (which can only fire once a request has actually used speculation).
@@ -478,6 +489,7 @@ def build_app(args) -> FastAPI:
             for key in ("model", "slots", "requests", "kv", "throughput", "spec", "last_request", "prefill_last"):
                 data.pop(key, None)
             data.update(online=False, active=False, split=[], split_source=None)
+            data["layer_placement"] = {"status": "no_model", "reason": "No model loaded", "devices": []}
 
         return JSONResponse(data)
 

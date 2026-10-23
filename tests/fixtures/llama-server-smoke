@@ -13,7 +13,11 @@ parser.add_argument("--port", type=int)
 parser.add_argument("--log-file")
 args, _ = parser.parse_known_args()
 log = Path(args.log_file)
-log.write_text("load_tensors: CPU model buffer size = 1.00 MiB\n")
+log.write_text("print_info: n_layer = 2\n"
+               "load_tensors: layer 0 assigned to device CPU, is_swa = 0\n"
+               "load_tensors: layer 1 assigned to device CPU, is_swa = 0\n"
+               "load_tensors: layer 2 assigned to device CPU, is_swa = 0\n"
+               "load_tensors: CPU model buffer size = 1.00 MiB\n")
 
 
 class Handler(BaseHTTPRequestHandler):

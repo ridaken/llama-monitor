@@ -1,12 +1,4 @@
-import {
-  Activity,
-  Boxes,
-  CircuitBoard,
-  Cpu,
-  Gauge,
-  MemoryStick,
-  Zap,
-} from 'lucide-react'
+import { Activity, Boxes, CircuitBoard, Cpu, Gauge, Zap } from 'lucide-react'
 import {
   ConfigurationPanel,
   LaunchControls,
@@ -23,8 +15,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { clamp, fmt, fmtGB } from '@/lib/utils'
-import type { Timing } from '@/types'
+import type { Stats, Timing } from '@/types'
 import type { useMonitor } from '@/hooks/useMonitor'
+import { useMonitorFit } from '@/hooks/useMonitorFit'
 
 type MonitorData = ReturnType<typeof useMonitor>
 const splitColors = [
@@ -195,6 +188,47 @@ const timing = (value?: Timing, rate = true) =>
     ? `${value.tokens.toLocaleString()} tok · ${value.secs.toFixed(2)}s${rate && value.tps ? ` (${value.tps.toFixed(0)} tok/s)` : ''}`
     : '—'
 
+function LayerRows({
+  placement,
+  label,
+}: {
+  placement?: Stats['layer_placement']
+  label?: string
+}) {
+  const entry = placement?.devices.find((device) => device.label === label)
+  const value =
+    placement?.status === 'no_model'
+      ? 'No model loaded'
+      : placement?.status === 'loading'
+        ? 'Loading'
+        : placement?.status === 'shared'
+          ? 'Shared across devices'
+          : placement?.status === 'available' && entry
+            ? `${entry.layers} / ${placement.total_layers}`
+            : 'Unavailable'
+  return (
+    <div className="layer-placement">
+      <Row
+        label="Assigned model layers"
+        value={value}
+        info="Primary device assignment for transformer layers, excluding the output layer. Expert or tensor overrides can place some weights on other devices; this is not a count of fully resident layers."
+      />
+      {placement?.status === 'available' && entry && (
+        <Row
+          label="Output layer"
+          value={
+            placement.output_device
+              ? placement.output_device === label
+                ? 'Assigned here'
+                : 'Elsewhere'
+              : 'Unavailable'
+          }
+        />
+      )}
+    </div>
+  )
+}
+
 export function Monitor({
   monitor,
   launcher,
@@ -202,6 +236,7 @@ export function Monitor({
   monitor: MonitorData
   launcher: LauncherController
 }) {
+  const fitRef = useMonitorFit()
   const { data: d, samples } = monitor
   const model = d?.model || {}
   const slots = d?.slots
@@ -225,9 +260,14 @@ export function Monitor({
         : 'MTP on · idle'
   const split = d?.split || []
   const splitTotal = split.reduce((sum, item) => sum + item.bytes, 0)
+  const placement = d?.layer_placement
+  const unmatched =
+    placement?.devices.filter(
+      (entry) => entry.label !== 'CPU' && entry.gpu_index == null,
+    ) || []
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="monitor-layout">
+      <div ref={fitRef} className="monitor-layout">
         <div className="monitor-controls">
           <div className="surface subtle-grid monitor-feature monitor-hero relative overflow-hidden rounded-2xl p-6 sm:p-8">
             <div className="absolute -right-20 -top-28 size-64 rounded-full bg-primary/10 blur-3xl" />
@@ -467,153 +507,167 @@ export function Monitor({
             </div>
           </Panel>
           <Panel
-            title={
-              d?.runtime?.containerized
-                ? 'Docker system memory'
-                : 'System memory'
-            }
-            icon={MemoryStick}
+            title="Hardware"
+            icon={Cpu}
             info={
               d?.runtime?.containerized
-                ? 'RAM visible inside Docker (the Linux VM on Docker Desktop) and the llama-server process resident memory; this is not Windows host RAM.'
-                : 'Whole-machine RAM and the llama-server process resident memory.'
+                ? 'Layer assignments, NVIDIA hardware, and RAM visible inside Docker (the Linux VM on Docker Desktop), not Windows host RAM. Trends show about 60 samples.'
+                : 'Layer assignments, NVIDIA hardware, whole-machine RAM and llama-server resident memory. Trends show about 60 samples.'
             }
-            className="monitor-memory"
+            className="monitor-hardware"
           >
-            <div id="sysmem">
-              {d?.sysmem?.ok ? (
-                <>
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-sm text-muted-foreground">
-                      RAM used
-                    </span>
-                    <strong className="metric text-2xl">
-                      {fmt(
-                        d.sysmem.percent ??
-                          (d.sysmem.total
-                            ? ((d.sysmem.used || 0) / d.sysmem.total) * 100
-                            : 0),
-                      )}
-                      %
-                    </strong>
-                  </div>
-                  <Spark
-                    values={samples.sysmem}
-                    max={100}
-                    color="#9e86eb"
-                    label="System RAM use over the last 60 samples"
-                  />
-                  <Row
-                    label="RAM"
-                    value={`${fmtGB(d.sysmem.used)} / ${fmtGB(d.sysmem.total)}`}
-                  />
-                  <Row
-                    label="llama-server RSS"
-                    value={fmtGB(d.sysmem.llama_rss)}
-                  />
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {d?.sysmem?.error || 'No system memory data.'}
-                </p>
-              )}
-            </div>
-          </Panel>
-          <Panel
-            title="GPUs"
-            icon={Cpu}
-            info="NVIDIA GPU temperature, utilization, power, and VRAM. Each trend shows about 60 samples."
-            className="monitor-gpus xl:col-span-3"
-          >
-            <div id="gpus">
-              {d?.gpu?.ok && d.gpu.devices?.length ? (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {d.gpu.devices.map((device) => {
-                    const hist = samples.gpu[device.index]
-                    const memPct = device.mem_total
-                      ? ((device.mem_used || 0) / device.mem_total) * 100
-                      : 0
-                    return (
-                      <div
-                        key={device.index}
-                        className="monitor-gpu rounded-xl border border-border/70 bg-background/30 p-4"
-                      >
-                        <div className="mb-4 flex items-start justify-between gap-3">
-                          <strong>
-                            CUDA{device.index} · {device.name || 'GPU'}
-                          </strong>
-                          <Badge variant="secondary">
-                            {fmt(device.power, 0)} W
-                          </Badge>
-                        </div>
-                        <div className="space-y-3">
-                          {(
-                            [
-                              [
-                                'Temp',
-                                'temp',
-                                device.temp,
-                                100,
-                                '#f17878',
-                                '°C',
-                              ],
-                              [
-                                'Util',
-                                'util',
-                                device.util_gpu,
-                                100,
-                                '#ff6a00',
-                                '%',
-                              ],
-                              [
-                                'Power',
-                                'power',
-                                device.power,
-                                device.power_limit || 1,
-                                '#e5ad66',
-                                'W',
-                              ],
-                            ] as const
-                          ).map(([label, key, value, max, color, unit]) => (
-                            <div
-                              key={key}
-                              className="grid grid-cols-[48px_1fr_70px] items-center gap-2 text-xs"
-                            >
-                              <span className="text-muted-foreground">
-                                {label}
-                              </span>
-                              <Spark
-                                values={hist?.[key] || []}
-                                max={max}
-                                color={color}
-                                label={`GPU ${device.index} ${label} trend`}
-                              />
-                              <span className="text-right mono">
-                                {fmt(value, 0)} {unit}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="mt-4 flex justify-between text-xs">
-                          <span className="text-muted-foreground">VRAM</span>
-                          <span className="mono">
-                            {fmtGB(device.mem_used)} / {fmtGB(device.mem_total)}
+            <div
+              id="gpus"
+              className="hardware-grid grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+            >
+              <div className="monitor-cpu rounded-xl border border-border/70 bg-background/30 p-4">
+                <strong className="mb-3 block">
+                  {d?.runtime?.containerized ? 'CPU & Docker RAM' : 'CPU & RAM'}
+                </strong>
+                <LayerRows placement={placement} label="CPU" />
+                <div id="sysmem">
+                  {d?.sysmem?.ok ? (
+                    <>
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-sm text-muted-foreground">
+                          RAM used
+                        </span>
+                        <strong className="metric text-2xl">
+                          {fmt(
+                            d.sysmem.percent ??
+                              (d.sysmem.total
+                                ? ((d.sysmem.used || 0) / d.sysmem.total) * 100
+                                : 0),
+                          )}
+                          %
+                        </strong>
+                      </div>
+                      <Spark
+                        values={samples.sysmem}
+                        max={100}
+                        color="#9e86eb"
+                        label="System RAM use over the last 60 samples"
+                      />
+                      <Row
+                        label="RAM"
+                        value={`${fmtGB(d.sysmem.used)} / ${fmtGB(d.sysmem.total)}`}
+                      />
+                      <Row
+                        label="llama-server RSS"
+                        value={fmtGB(d.sysmem.llama_rss)}
+                      />
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {d?.sysmem?.error || 'No system memory data.'}
+                    </p>
+                  )}
+                </div>
+              </div>
+              {(d?.gpu?.devices || []).map((device) => {
+                const hist = samples.gpu[device.index]
+                const memPct = device.mem_total
+                  ? ((device.mem_used || 0) / device.mem_total) * 100
+                  : 0
+                return (
+                  <div
+                    key={device.index}
+                    className="monitor-gpu rounded-xl border border-border/70 bg-background/30 p-4"
+                  >
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <strong>
+                        GPU {device.index} · {device.name || 'GPU'}
+                      </strong>
+                      <Badge variant="secondary">
+                        {fmt(device.power, 0)} W
+                      </Badge>
+                    </div>
+                    <LayerRows
+                      placement={placement}
+                      label={
+                        placement?.devices.find(
+                          (entry) => entry.gpu_index === device.index,
+                        )?.label
+                      }
+                    />
+                    <div className="space-y-3">
+                      {(
+                        [
+                          ['Temp', 'temp', device.temp, 100, '#f17878', '°C'],
+                          [
+                            'Util',
+                            'util',
+                            device.util_gpu,
+                            100,
+                            '#ff6a00',
+                            '%',
+                          ],
+                          [
+                            'Power',
+                            'power',
+                            device.power,
+                            device.power_limit || 1,
+                            '#e5ad66',
+                            'W',
+                          ],
+                        ] as const
+                      ).map(([label, key, value, max, color, unit]) => (
+                        <div
+                          key={key}
+                          className="grid grid-cols-[48px_1fr_70px] items-center gap-2 text-xs"
+                        >
+                          <span className="text-muted-foreground">{label}</span>
+                          <Spark
+                            values={hist?.[key] || []}
+                            max={max}
+                            color={color}
+                            label={`GPU ${device.index} ${label} trend`}
+                          />
+                          <span className="text-right mono">
+                            {fmt(value, 0)} {unit}
                           </span>
                         </div>
-                        <Progress
-                          value={clamp(memPct)}
-                          className="mt-2 h-1.5"
-                        />
-                      </div>
-                    )
-                  })}
+                      ))}
+                    </div>
+                    <div className="mt-4 flex justify-between text-xs">
+                      <span className="text-muted-foreground">VRAM</span>
+                      <span className="mono">
+                        {fmtGB(device.mem_used)} / {fmtGB(device.mem_total)}
+                      </span>
+                    </div>
+                    <Progress value={clamp(memPct)} className="mt-2 h-1.5" />
+                  </div>
+                )
+              })}
+              {unmatched.map((entry) => (
+                <div
+                  key={entry.label}
+                  className="monitor-placement rounded-xl border border-border/70 bg-background/30 p-4"
+                >
+                  <strong>
+                    {entry.label}
+                    {entry.name ? ` · ${entry.name}` : ''}
+                  </strong>
+                  <LayerRows placement={placement} label={entry.label} />
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Hardware telemetry unavailable for this device.
+                  </p>
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {d?.gpu?.error || 'No GPU data.'}
-                </p>
-              )}
+              ))}
             </div>
+            {placement?.reason && (
+              <p
+                id="placement-note"
+                className="mt-3 text-xs text-muted-foreground"
+              >
+                {placement.reason}
+              </p>
+            )}
+            {!d?.gpu?.ok && (
+              <p id="gpu-error" className="mt-3 text-xs text-muted-foreground">
+                {d?.gpu?.error || 'No GPU data.'}
+              </p>
+            )}
             <div
               id="gpu-total-w"
               className="mt-4 text-right text-sm text-muted-foreground"

@@ -115,11 +115,16 @@ def main():
             eventually(lambda: request("/health", inference=True)["status"] == "ok")
             assert cli("smoke", "--timeout", "10")["message"]["content"] == "smoke response"
             assert cli("stats")["runtime"]["containerized"]
+            eventually(lambda: cli("stats")["layer_placement"]["status"] == "available")
+            placement = cli("stats")["layer_placement"]
+            assert placement["total_layers"] == 2 and placement["output_device"] == "CPU"
+            assert placement["devices"] == [{"label": "CPU", "layers": 2}]
             assert cli("logs", "--tail", "2")["available"]
             assert cli("gaming", "status")["supported"] is False
             assert cli("startup", "status")["supported"] is False
             eventually(lambda: cli("history", "list")["items"])
             assert cli("stop")["status"]["state"] == "stopped"
+            assert cli("stats")["layer_placement"]["status"] == "no_model"
             assert exec_python("from pathlib import Path; print(Path('/data/smoke-stopped').read_text())") == "graceful"
             assert cli("launch", "--config-file", "-", "--wait", "--timeout", "30",
                        input=json.dumps(config))["readiness"]["ready"]

@@ -88,6 +88,19 @@ export type KnownFlag = {
 }
 export type FlagResponse = { source: string; flags: KnownFlag[] }
 export type Stats = {
+  layer_placement?: {
+    status: 'available' | 'shared' | 'no_model' | 'loading' | 'unavailable'
+    reason?: string | null
+    total_layers?: number
+    output_device?: string | null
+    devices: Array<{
+      label: string
+      layers: number
+      name?: string
+      identity?: string | null
+      gpu_index?: number
+    }>
+  }
   runtime?: RuntimeInfo
   online: boolean
   gaming?: GamingState
@@ -132,6 +145,8 @@ export type Stats = {
     devices?: Array<{
       index: number
       name?: string
+      uuid?: string
+      pci_bus_id?: string
       temp?: number | null
       util_gpu?: number | null
       power?: number | null

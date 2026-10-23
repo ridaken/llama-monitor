@@ -233,6 +233,13 @@ class ServerManager:
         advertised = flags_mod.get_server_flags(binary)
         supported = {alias for entry in advertised["flags"] for alias in entry.get("flags", [])} \
             if advertised["source"] == "help" else set()
+        logging_flags = {"-lv", "--verbosity", "--log-verbosity", "-v", "--verbose",
+                         "--log-verbose", "--log-disable"}
+        explicit_logging = any(token.split("=", 1)[0] in logging_flags for token in argv[3:])
+        logging_env = any(name in os.environ for name in
+                          ("LLAMA_ARG_LOG_VERBOSITY", "LLAMA_ARG_LOG_DISABLE", "LLAMA_ARG_LOG_VERBOSE"))
+        if "--log-verbosity" in supported and not explicit_logging and not logging_env:
+            argv += ["--log-verbosity", "5"]
         for flag in ("--log-jsonl", "--log-timestamps"):
             if flag in supported:
                 argv.append(flag)

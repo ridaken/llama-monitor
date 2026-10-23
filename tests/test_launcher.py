@@ -369,3 +369,35 @@ def test_stop_adopted_server_terminates_pid_and_clears_record(good_settings, mon
     assert seen["pid"] == 4321 and seen.get("terminated") is True
     assert st["state"] == "stopped"
     assert store.get_running() is None
+
+
+@pytest.mark.parametrize("override", [None, "-lv", "--verbosity", "--log-verbosity", "--log-verbosity=2", "-v", "--verbose", "--log-verbose", "--log-disable"])
+def test_placement_logging_default_and_explicit_flags(monkeypatch, override):
+    for name in ("LLAMA_ARG_LOG_VERBOSITY", "LLAMA_ARG_LOG_DISABLE", "LLAMA_ARG_LOG_VERBOSE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(launcher.flags_mod, "get_server_flags", lambda binary: {
+        "source": "help", "flags": [{"flags": ["--log-verbosity"]}]})
+    config = {"model_path": "model.gguf", "port": 8001,
+              "flags": [{"flag": override, "value": "2"}] if override else []}
+    argv = ServerManager(lambda *a: None).build_argv(config, "llama-server")
+    assert ("5" in argv) == (override is None)
+
+
+@pytest.mark.parametrize("name", ["LLAMA_ARG_LOG_VERBOSITY", "LLAMA_ARG_LOG_DISABLE", "LLAMA_ARG_LOG_VERBOSE"])
+def test_placement_logging_honors_environment(monkeypatch, name):
+    monkeypatch.setenv(name, "4")
+    monkeypatch.setattr(launcher.flags_mod, "get_server_flags", lambda binary: {
+        "source": "help", "flags": [{"flags": ["--log-verbosity"]}]})
+    argv = ServerManager(lambda *a: None).build_argv({"model_path": "m.gguf", "port": 8001}, "llama-server")
+    assert "--log-verbosity" not in argv
+
+
+def test_placement_logging_skips_disabled_override_and_unadvertised_support(monkeypatch):
+    monkeypatch.delenv("LLAMA_ARG_LOG_VERBOSITY", raising=False)
+    config = {"model_path": "m.gguf", "port": 8001,
+              "flags": [{"flag": "-lv", "value": "2", "enabled": False}]}
+    for source, expected in [("help", True), ("bundled", False)]:
+        monkeypatch.setattr(launcher.flags_mod, "get_server_flags", lambda binary: {
+            "source": source, "flags": [{"flags": ["--log-verbosity"]}]})
+        argv = ServerManager(lambda *a: None).build_argv(config, "llama-server")
+        assert ("--log-verbosity" in argv) == expected

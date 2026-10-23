@@ -25,10 +25,15 @@ test('Docker explains ports, model paths, telemetry, and native-only features', 
   await expect(page.locator('#lx-port')).toHaveAttribute('readonly', '')
   await expect(
     page.getByRole('button', {
-      name: 'More about Docker system memory',
+      name: 'More about Hardware',
       exact: true,
     }),
   ).toBeVisible()
+  await expect(page.locator('.monitor-cpu')).toContainText('CPU & Docker RAM')
+  await page
+    .getByRole('button', { name: 'More about Hardware', exact: true })
+    .hover()
+  await expect(page.getByRole('tooltip')).toContainText('not Windows host RAM')
   await expect(page.getByText(/Change INFERENCE_PORT/)).toBeVisible()
   await page.getByRole('link', { name: 'Manage', exact: true }).click()
   await expect(page.getByText(/Browse models under \/models/)).toBeVisible()

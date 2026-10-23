@@ -389,3 +389,16 @@ def test_gpu_absent_nvml_is_still_optional(monkeypatch):
         "ok": False, "error": "nvidia-ml-py (pynvml) not installed", "devices": [],
     }
     gpu.shutdown()
+
+
+@pytest.mark.parametrize("available", ["uuid", "pci_bus_id"])
+def test_gpu_stable_identities_fail_independently(monkeypatch, available):
+    gpu, nvml, _ = _gpu_collector(monkeypatch)
+    if available == "uuid":
+        monkeypatch.setattr(nvml, "nvmlDeviceGetUUID", lambda handle: b"GPU-test", raising=False)
+    else:
+        monkeypatch.setattr(nvml, "nvmlDeviceGetPciInfo", lambda handle: SimpleNamespace(busId=b"00000000:01:00.0"), raising=False)
+    data = gpu.collect(set())
+    assert available in data["devices"][0]
+    assert data["devices"][0]["temp"] == 40
+    gpu.shutdown()
