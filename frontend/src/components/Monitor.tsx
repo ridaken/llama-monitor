@@ -585,6 +585,7 @@ export function Monitor({
                         <Row
                           label="llama-server RSS"
                           value={fmtGB(d.sysmem.llama_rss)}
+                          info="RSS (resident set size) is the system RAM currently resident for the detected llama-server processes, including resident model pages and runtime memory. It excludes GPU VRAM and can differ from buffer sizes recorded in the load log."
                         />
                       </div>
                     </>

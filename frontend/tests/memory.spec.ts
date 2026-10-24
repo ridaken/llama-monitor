@@ -1,6 +1,32 @@
 import { expect, test } from '@playwright/test'
 import { mockApi, stats } from './fixtures'
 
+test('llama-server RSS explains resident RAM on hover and keyboard focus', async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.goto('/')
+  const info = page.getByRole('button', {
+    name: 'More about llama-server RSS',
+    exact: true,
+  })
+  const tooltip = page.getByRole('tooltip')
+
+  await info.hover()
+  await expect(tooltip).toContainText('RSS (resident set size)')
+  await expect(tooltip).toContainText('system RAM currently resident')
+  await expect(tooltip).toContainText('excludes GPU VRAM')
+  await expect(tooltip).toContainText('buffer sizes recorded in the load log')
+  await page.keyboard.press('Escape')
+  await expect(tooltip).toBeHidden()
+
+  await page.mouse.move(0, 0)
+  await info.focus()
+  await expect(tooltip).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(tooltip).toBeHidden()
+})
+
 for (const source of ['log', 'nvml', 'nvml-delta']) {
   test(`Hardware embeds model memory with its ${source} source`, async ({
     page,
