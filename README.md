@@ -52,8 +52,9 @@ SQLite. NVML supplies NVIDIA GPU telemetry, and psutil supplies RAM/process data
 There is no cloud account or model download step.
 
 **Monitor** combines model controls, saved configurations, and telemetry.
-**Manage** holds executable selection and native Windows integrations.
-**History** explores saved generations and optional prompts. Log collection and
+**Manage** holds executable selection, proxy controls, and native Windows integrations.
+**Requests** explores captured proxy request/response pairs.
+**History** explores saved generations and optional native prompts. Log collection and
 Windows coordination run without an open browser; live chart samples are kept in
 the browser and restart on reload. The browser retains up to 60 samples per trend,
 with a three-sample average for decode speed, so the displayed time span varies
@@ -61,7 +62,8 @@ with activity, missing readings, and response time.
 
 The monitor's [control API](docs/api.md) normally uses port 8500. Inference clients
 send requests directly to llama-server's OpenAI-compatible `/v1` API, normally port
-8001 for a managed model. The monitor does not proxy inference requests.
+8001 for a managed model. Optionally enable the inference proxy on port 8501 to
+capture request/response pairs while preserving direct inference access.
 
 ### Speculative decoding (MTP / draft)
 
@@ -599,6 +601,67 @@ See the [history API](docs/api.md#history-and-prompts) and
 [CLI history filters](docs/cli.md#history-filters) for querying records, pagination,
 prompt retrieval, and clearing stored history.
 
+## Inference proxy and request history
+
+Enable **Manage → Inference proxy → Enable inference proxy**, then change your
+client base URL from llama-server (for example `http://localhost:8001/v1`) to
+`http://localhost:8501/v1`. Native completion clients can use `/completion` on
+that same proxy port. The proxy follows the current managed model or external
+`--llama-url` target. Direct llama-server connections and existing monitoring
+continue to work; direct traffic cannot have responses captured.
+
+The inference listener is separate from the dashboard and exposes no monitor
+management routes. It forwards HTTP methods, paths, query strings, authentication,
+bodies, upstream status codes, and CORS headers. Streaming output arrives as it
+is generated; disconnecting closes the upstream connection. Requests are never
+automatically retried or moved to a different model midstream. Stopped/switching
+targets return an unavailable response. Listener failures leave the dashboard usable.
+
+**Save request prompts** and **Save model responses** start enabled. These
+independent Manage toggles persist and apply to new requests without relaunching
+the model. They do not change the separate native prompt-file setting. Capture
+includes streaming and non-streaming `/v1/chat/completions`, `/v1/completions`,
+and `/completion`, including reasoning and tool calls. Other HTTP endpoints pass
+through without readable content capture; no additional upstream routing is done.
+
+Open **Requests** for paired prompts/responses, model/endpoint/outcome/date filters,
+HTTP status, duration, first observed generated content, usage when supplied,
+and request IDs. First-token timing for non-streaming JSON is observed when the
+complete JSON response is received, not a measurement of upstream token generation.
+Activity **History** remains the separate source for server-log timings; requests
+are never matched to generations by timestamp. There is no automatic refresh of
+the Requests list: use **Refresh** to inspect recently completed requests.
+
+Proxy records share `history.sqlite` but have their own **Clear requests** action.
+They remain until cleared. Authentication headers and query strings are not saved.
+Image/binary inputs are replaced with omission markers. Each saved payload is
+limited to 1 MiB; truncation affects capture only. Incomplete, cancelled, or
+interrupted records can contain partial output. If capture fails, inference
+continues and Manage/CLI report a warning. This is best-effort local observability,
+not a guaranteed audit log. The dashboard controls access to saved content under
+its existing trusted-network deployment model.
+
+```sh
+python cli.py proxy status --json
+python cli.py proxy settings --enabled on --json
+python cli.py proxy smoke --stream --timeout 60 --json
+python cli.py requests list --limit 10 --json
+python cli.py requests show REQUEST_ID --json
+python cli.py proxy settings --log-responses off --json
+python cli.py requests clear --yes --json
+```
+
+In Docker, prefix these commands with `docker compose exec -T monitor`.
+Compose publishes `PROXY_PORT=8501` on `PROXY_BIND_ADDRESS=127.0.0.1` by default;
+use `0.0.0.0` for LAN clients and recreate the service after changing publication.
+Native `--proxy-host` defaults to the dashboard bind address and `--proxy-port`
+defaults to 8501 (`MONITOR_PROXY_HOST` / `MONITOR_PROXY_PORT` environment overrides).
+Choose different dashboard, inference, and proxy ports. The proxy forwards client
+credentials to the upstream; it adds no independent API-key or TLS layer.
+`proxy smoke --api-key-env NAME` reads an upstream key from the CLI environment.
+When the externally published proxy address differs, set `LLAMA_MONITOR_PROXY_URL`
+to its root URL, such as `http://server:9001` (without `/v1`).
+
 ## Automatic Windows startup (native installation)
 
 Open **Manage → Windows startup** and click **Set up Windows startup**. The app
@@ -710,6 +773,8 @@ python app.py --llama-url http://localhost:8001 --llama-log "C:\llama-logs\llama
 | `--llama-prompts-dir` | _(none)_ | Directory written by an external server's `--log-prompts-dir` flag |
 | `--port` | `8500` | Port for this dashboard |
 | `--host` | `127.0.0.1` | Bind address |
+| `--proxy-host` | Dashboard host | Proxy bind address; `MONITOR_PROXY_HOST` overrides the default |
+| `--proxy-port` | `8501` | Proxy listener port; `MONITOR_PROXY_PORT` overrides the default |
 | `--background` | Off | Use rotating `backend.log` in the data directory; Windows startup pairs this with `pythonw.exe` for a hidden process. It does not install a task or daemonize a foreground Python process by itself. |
 | `--test-mode` | Off | Require a separate data directory, skip process adoption/integration automation, and stop test-owned models at shutdown; see [isolated tests](#isolated-development-tests). |
 
@@ -756,6 +821,7 @@ ports; it cleans up only its own resources and needs no real GGUF or GPU:
 ```sh
 python -m pytest -q tests
 python tests/container_smoke.py
+python tests/native_proxy_smoke.py
 # Optional NVIDIA image/integration check:
 python tests/container_smoke.py --gpu
 ```

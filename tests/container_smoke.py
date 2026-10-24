@@ -46,7 +46,7 @@ def main():
         Path(directory, "smoke.gguf").touch()
         env = {**os.environ, "MODELS_DIR": Path(directory).as_posix(),
                "BIND_ADDRESS": "127.0.0.1", "DASHBOARD_PORT": str(free_port()),
-               "INFERENCE_PORT": str(free_port())}
+               "INFERENCE_PORT": str(free_port()), "PROXY_PORT": str(free_port()), "PROXY_BIND_ADDRESS": "127.0.0.1"}
         env.pop("LLAMA_CPP_IMAGE", None)
         compose = ["docker", "compose", "-p", f"llama-monitor-smoke-{os.getpid()}", "-f", "compose.yaml"]
         if args.gpu:
@@ -115,6 +115,25 @@ def main():
             assert cli("launch", "--config", "smoke", "--wait", "--timeout", "30")["readiness"]["ready"]
             eventually(lambda: request("/health", inference=True)["status"] == "ok")
             assert cli("smoke", "--timeout", "10")["message"]["content"] == "smoke response"
+            assert not cli("proxy", "status")["enabled"]
+            cli("proxy", "smoke", expected=1)
+            assert cli("proxy", "settings", "--enabled", "on")["listening"]
+            probe = cli("proxy", "smoke", "--stream", "--timeout", "10")
+            assert probe["response"]["choices"][0]["content"] == "smoke response"
+            assert probe["first_chunk_seconds"] < probe["elapsed_seconds"] - 0.1
+            eventually(lambda: cli("requests", "show", probe["request_id"])["state"] == "complete")
+            saved = cli("requests", "show", probe["request_id"])
+            assert "Reply with OK" in saved["request_text"] and "smoke response" in saved["response_text"]
+            assert cli("proxy", "settings", "--log-responses", "off")["log_responses"] is False
+            probe = cli("proxy", "smoke", "--timeout", "10")
+            eventually(lambda: cli("requests", "show", probe["request_id"])["state"] == "complete")
+            assert cli("requests", "show", probe["request_id"])["response_text"] is None
+            assert cli("requests", "list")["items"]
+            cli("requests", "clear", expected=2)
+            cli("requests", "clear", "--yes")
+            assert cli("requests", "list")["items"] == []
+            assert cli("proxy", "settings", "--enabled", "off")["listening"] is False
+            assert request("/health", inference=True)["status"] == "ok"
             assert cli("stats")["runtime"]["containerized"]
             eventually(lambda: cli("stats")["layer_placement"]["status"] == "available")
             memory = cli("stats")

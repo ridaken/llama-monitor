@@ -1,0 +1,3 @@
+# Keep frontend formatting and committed Vite output reproducible on Windows.
+frontend/** text eol=lf
+static/app/** text eol=lf -whitespace

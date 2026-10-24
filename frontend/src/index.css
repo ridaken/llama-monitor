@@ -671,8 +671,22 @@ button:disabled {
   min-width: 0;
 }
 @media (min-width: 1280px) {
+  .app-fit .manage-panel-header {
+    padding: 10px 16px 6px;
+  }
+  .app-fit .manage-panel-content {
+    padding-bottom: 10px;
+  }
+  .app-fit .manage-panel-content > :not(:last-child) {
+    margin-block-end: 6px;
+  }
+  .app-fit .manage-panel-content .text-sm {
+    font-size: 12px;
+    line-height: 18px;
+  }
   .app-fit .manage-layout {
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
     align-items: start;
   }
   .app-fit #binary-panel {
@@ -690,6 +704,10 @@ button:disabled {
   .app-fit #startup-panel {
     grid-column: 2;
     grid-row: 3;
+  }
+  .app-fit #proxy-panel {
+    grid-column: 3;
+    grid-row: 1 / span 3;
   }
 }
 

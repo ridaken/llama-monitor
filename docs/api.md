@@ -3,13 +3,16 @@
 This is the llama-monitor **control and monitoring API**, normally at
 `http://127.0.0.1:8500`. llama-server's OpenAI-compatible inference API is a
 separate service, normally port 8001 for managed launches (`/v1/...`). The monitor
-does not proxy that API. Docker host ports can be changed in `.env`.
+can optionally proxy that API on port 8501 when enabled in Manage. Docker host
+ports can be changed in `.env`. The proxy listener forwards to llama-server;
+the management routes below remain on the dashboard listener.
 
 - [Conventions and access](#conventions-and-access)
 - [Telemetry and health](#telemetry-and-health)
 - [Launcher and verification](#launcher-and-verification)
 - [Configurations and filesystem browsing](#configurations-and-filesystem-browsing)
 - [History and prompts](#history-and-prompts)
+- [Proxy and captured requests](#proxy-and-captured-requests)
 - [Gaming integration](#gaming-integration)
 - [Windows startup](#windows-startup)
 
@@ -306,3 +309,44 @@ never submit a Windows password to this API. The task runs the backend hidden
 under the user's account. Installation applies at the next boot/sign-in and does
 not restart the current backend. Model loading is once per boot and yields to
 existing servers and gaming recovery; see [Windows startup](../README.md#automatic-windows-startup-native-installation).
+
+
+## Proxy and captured requests
+
+These controls are on the dashboard port. The optional inference listener defaults
+to port 8501, forwards all HTTP paths to the current upstream, and does not expose
+monitor management routes. Proxying starts disabled; prompt and response capture
+start enabled. Capture is limited to POST `/v1/chat/completions`, `/v1/completions`
+and `/completion`. Other routes pass through without request-history entries.
+
+| Method and route | Inputs | Response and effects |
+| --- | --- | --- |
+| `GET /api/proxy/state` | None | `enabled`, `log_prompts`, `log_responses`, `host`, `port`, `base_url`, `target`, `listening`, `listener_error`, `capture_error`. Target may be null while stopped/switching. `base_url` uses the listener bind address; use the reachable host/published port for remote clients. |
+| `POST /api/proxy/settings` | Partial JSON object containing strict booleans `enabled`, `log_prompts`, `log_responses` | Persists settings and starts/stops the listener as needed. Returns proxy state. Unknown keys/non-booleans return 400. A bind failure is represented by `listening: false` and `listener_error` while the dashboard stays available; HTTP 200 alone does not prove the proxy is listening. |
+| `GET /api/requests` | Optional `model`, `endpoint`, `state`, `from_ts`, `to_ts`, `cursor`, `limit` | `{items, next_cursor, capture_error}`. Exact-match text filters; Unix timestamps with inclusive lower/exclusive upper bound. Newest first. Limit 1–200, default 50. Metadata only. Invalid pagination/filter bounds return 400. |
+| `GET /api/requests/{id}` | Monitor request ID | Metadata plus nullable `request_text` and `response_text`; missing/cleared ID returns 404. Text can be formatted JSON or an explicit content-unavailable marker. |
+| `DELETE /api/requests` | None | `{deleted: N}`; deletes only proxy request records and prevents active requests from recreating cleared records. Confirmation is provided by UI/CLI, not the HTTP endpoint. |
+
+Metadata includes `id`, `observed_at`, `completed_at`, `endpoint`, `method`,
+`target`, nullable `run_id`, `model`, `status_code`, `duration_seconds`,
+`first_token_seconds`, nullable `usage`, `prompt_logging`, `response_logging`,
+`request_truncated`, `response_truncated`, and `capture_invalid`. Fields available
+only at completion may be absent on running rows. States are `running`, `complete`,
+`cancelled`, `incomplete`, `interrupted`, and `error`. Restart changes unfinished
+rows to interrupted. Missing token usage is null, not zero. Non-streaming first-token
+timing is the receipt of generated content in the complete JSON response.
+
+The proxy adds `X-Llama-Monitor-Request-ID` to upstream requests and downstream
+responses. It preserves upstream error status/body; unavailable managed targets
+return 503, connection failures 502, and connection timeouts 504. A failure after
+streaming headers have been sent terminates the stream rather than inventing a
+success or replacing the upstream payload. Client cancellation closes the upstream
+connection, without claiming the server has stopped computation synchronously.
+
+Saved payloads are bounded at 1 MiB per side, with image/binary omission markers.
+Logging flags are captured at request start; changing them does not delete existing
+records or change active requests. Headers and query strings are never persisted.
+Content and usage interpretation are best effort, and storage failures do not fail
+inference. Requests and log-derived Activity history are never joined by timestamp.
+There is no automatic expiry. The dashboard's existing access model applies to
+these settings and saved content.

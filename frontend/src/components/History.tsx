@@ -200,7 +200,7 @@ export function History({ active }: { active: boolean }) {
         ? 'Log unavailable; live monitoring uses HTTP until it returns.'
         : coverage.prompts_configured
           ? 'Observed generations and native prompt files. Unmatched prompts appear as Prompt only.'
-          : 'Observed generations. Enable prompt logging in Manage to save prompt text.'
+          : 'Observed generations. Enable Save prompts in Activity history in the model configuration to save native prompt text.'
   const models = result?.models || []
   const rows = result?.items || []
   return (
@@ -214,8 +214,8 @@ export function History({ active }: { active: boolean }) {
                 Activity history
               </CardTitle>
               <CardDescription className="mt-2">
-                Observed generations and saved prompts. Response text is never
-                saved.
+                Log-derived generations and saved native prompts. Proxy request
+                and response content is available in Requests.
               </CardDescription>
             </div>
             <Button

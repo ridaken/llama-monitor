@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./
 COPY --from=frontend /src/static/app ./static/app
 USER monitor
-EXPOSE 8500 8001
+EXPOSE 8500 8001 8501
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8500/api/health', timeout=3)"]
 ENTRYPOINT ["python", "app.py"]

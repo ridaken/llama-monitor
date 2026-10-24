@@ -9,6 +9,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { History } from '@/components/History'
+import { Requests } from '@/components/Requests'
 import { LauncherDialogs } from '@/components/Launcher'
 import { useLauncher } from '@/hooks/useLauncher'
 import { Manage } from '@/components/Manage'
@@ -16,7 +17,7 @@ import { Monitor } from '@/components/Monitor'
 import { useMonitor } from '@/hooks/useMonitor'
 import { gamingLabel } from '@/lib/gaming'
 
-type View = 'monitor' | 'manage' | 'history'
+type View = 'monitor' | 'manage' | 'history' | 'requests'
 type AppLayout = 'fit' | 'comfortable'
 const appLayoutKey = 'llama-monitor:monitor-layout'
 const readAppLayout = (): AppLayout => {
@@ -30,7 +31,9 @@ const readAppLayout = (): AppLayout => {
 }
 const readView = (): View => {
   const hash = location.hash.slice(1)
-  return hash === 'manage' || hash === 'history' ? hash : 'monitor'
+  return hash === 'manage' || hash === 'history' || hash === 'requests'
+    ? hash
+    : 'monitor'
 }
 
 export default function App() {
@@ -87,6 +90,12 @@ export default function App() {
       label: 'History',
       icon: HistoryIcon,
       description: 'Past activity',
+    },
+    {
+      key: 'requests',
+      label: 'Requests',
+      icon: Activity,
+      description: 'Proxy prompts and responses',
     },
   ]
   return (
@@ -204,7 +213,9 @@ export default function App() {
               ? 'Live monitor'
               : view === 'manage'
                 ? 'Server management'
-                : 'Activity history'}
+                : view === 'requests'
+                  ? 'Proxy requests'
+                  : 'Activity history'}
           </h1>
           <div className="monitor-view" hidden={view !== 'monitor'}>
             <Monitor monitor={monitor} launcher={launcher} />
@@ -214,6 +225,9 @@ export default function App() {
           </div>
           <div hidden={view !== 'history'}>
             <History active={view === 'history'} />
+          </div>
+          <div hidden={view !== 'requests'}>
+            <Requests active={view === 'requests'} />
           </div>
         </main>
         <LauncherDialogs launcher={launcher} />

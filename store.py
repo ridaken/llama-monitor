@@ -65,6 +65,7 @@ def _default_state() -> dict:
             "autostart_default_model": False,
         },
         "configs": [],
+        "proxy": {"enabled": False, "log_prompts": True, "log_responses": True},
         # The server this dashboard last launched, so a restarted dashboard can
         # re-adopt a still-running server instead of losing track of it. None
         # when nothing is launched (or after an explicit Stop).
@@ -95,8 +96,9 @@ def _normalise(state: dict) -> dict:
         running = None
     gaming = {**base["gaming"], **(state.get("gaming") or {})}
     startup = {**base["startup"], **(state.get("startup") or {})}
+    proxy = {**base["proxy"], **(state.get("proxy") or {})}
     return {"settings": settings, "configs": configs, "running": running,
-            "gaming": gaming, "startup": startup}
+            "gaming": gaming, "startup": startup, "proxy": proxy}
 
 
 def load_state() -> dict:
@@ -135,6 +137,14 @@ def update_gaming(**changes) -> dict:
 
 def update_startup(**changes) -> dict:
     return update_state(lambda state: state["startup"].update(changes))["startup"]
+
+
+def get_proxy() -> dict:
+    return load_state()["proxy"]
+
+
+def update_proxy(**changes) -> dict:
+    return update_state(lambda state: state["proxy"].update(changes))["proxy"]
 
 
 # --------------------------------------------------------------------------- #

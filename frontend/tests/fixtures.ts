@@ -185,6 +185,19 @@ export async function mockApi(
     }
     let body: any
     if (path === '/api/stats') body = stats
+    else if (path === '/api/proxy/state')
+      body = {
+        enabled: false,
+        log_prompts: true,
+        log_responses: true,
+        listening: false,
+        host: '127.0.0.1',
+        port: 8501,
+        target: 'http://127.0.0.1:8001',
+        listener_error: null,
+        capture_error: null,
+      }
+    else if (path === '/api/requests') body = { items: [], next_cursor: null }
     else if (path === '/api/gaming/state') body = gamingState
     else if (path === '/api/startup/state') body = startupState
     else if (path === '/api/launcher/state') body = launcherState
