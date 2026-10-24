@@ -160,6 +160,20 @@ def test_smoke_has_explicit_deadline(invoke):
     assert calls[0].extensions["timeout"]["read"] == 32
 
 
+def test_test_prompt_uses_backend_route_and_default_deadline(invoke):
+    code, output, calls = invoke(["test-prompt"], lambda _: {"route": "proxy", "message": {"content": "code"}})
+    assert code == 0 and output["data"]["route"] == "proxy"
+    assert len(calls) == 1 and calls[0].method == "POST" and calls[0].url.path == "/api/inference/test"
+    assert json.loads(calls[0].content) == {"timeout": 120}
+    assert calls[0].extensions["timeout"]["read"] == 122
+
+
+@pytest.mark.parametrize("timeout", ["0", "301", "nan", "inf"])
+def test_test_prompt_rejects_invalid_timeout(invoke, timeout):
+    code, _, calls = invoke(["test-prompt", "--timeout", timeout], lambda _: pytest.fail("no HTTP"))
+    assert code == 2 and not calls
+
+
 @pytest.mark.parametrize("healthy", [True, False])
 def test_doctor_preserves_report_and_exit_code(invoke, healthy):
     report = {"healthy": healthy, "summary": "diagnostic result", "checks": [], "recovery": []}

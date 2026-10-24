@@ -167,3 +167,145 @@ def test_api_contracts_and_validation(probe, monkeypatch):
             raise v.VerificationError("model unavailable")
         monkeypatch.setattr(probe, "smoke", failed)
         assert client.post("/api/launcher/smoke", json={}).status_code == 409
+
+
+@pytest.fixture
+def prompt_test(probe):
+    target = {"url": "http://127.0.0.1:8001", "managed": True, "run_id": "test-run"}
+
+    async def state():
+        return {"enabled": False, "listening": False, "host": "0.0.0.0", "port": 8501}
+
+    async def validate(_):
+        return True
+
+    proxy = SimpleNamespace(target=lambda: target.copy(), state=state, validate_target=validate)
+    return v.InferenceTest(probe, proxy)
+
+
+def test_fixed_prompt_uses_active_target_and_preserves_smoke(probe, prompt_test, monkeypatch):
+    import json
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "print('FizzBuzz')"}}]})
+
+    inference(monkeypatch, handler)
+    result = asyncio.run(prompt_test.run(2))
+    assert result["route"] == "direct" and result["request_id"] is None
+    assert result["run_id"] == "test-run" and result["prompt"] == v.TEST_PROMPT
+    body = json.loads(calls[0].content)
+    assert len(calls) == 1 and calls[0].url.port == 8001
+    assert body == {"messages": [{"role": "user", "content": v.TEST_PROMPT}],
+                    "temperature": 0, "max_tokens": 2048, "stream": False}
+    assert asyncio.run(probe.smoke(2))["message"]["content"]
+    assert json.loads(calls[1].content)["max_tokens"] == 16
+
+
+@pytest.mark.parametrize("host,destination", [("0.0.0.0", "127.0.0.1"), ("::", "::1"), ("127.0.0.1", "127.0.0.1")])
+def test_prompt_connects_to_real_proxy_listener(prompt_test, monkeypatch, host, destination):
+    async def state():
+        return {"enabled": True, "listening": True, "host": host, "port": 8501}
+
+    prompt_test.proxy.state = state
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, headers={"X-Llama-Monitor-Request-ID": "request-one"},
+                              json={"choices": [{"message": {"content": "answer"}}]})
+
+    inference(monkeypatch, handler)
+    result = asyncio.run(prompt_test.run(2))
+    assert result["route"] == "proxy" and result["request_id"] == "request-one"
+    assert len(calls) == 1 and calls[0].url.host == destination and calls[0].url.port == 8501
+
+
+def test_prompt_does_not_bypass_unavailable_proxy(prompt_test, monkeypatch):
+    async def state():
+        return {"enabled": True, "listening": False, "listener_error": "Port in use"}
+
+    prompt_test.proxy.state = state
+    inference(monkeypatch, lambda _: pytest.fail("must not send inference"))
+    with pytest.raises(v.VerificationError, match="Port in use"):
+        asyncio.run(prompt_test.run(2))
+
+
+@pytest.mark.parametrize("mode", ["stopped", "loading", "switching", "wrong_listener"])
+def test_prompt_requires_ready_owned_target(prompt_test, probe, monkeypatch, mode):
+    if mode == "stopped":
+        probe.manager.status = lambda: {"state": "stopped"}
+    elif mode == "loading":
+        monkeypatch.setattr(probe, "readiness", lambda: {"ready": False, "reason": "Loading model"})
+    elif mode == "switching":
+        probe.gaming.state = lambda: {"blocked": True}
+    else:
+        monkeypatch.setattr(v, "owns_port", lambda _: False)
+    inference(monkeypatch, lambda _: pytest.fail("must not send inference"))
+    with pytest.raises(v.VerificationError):
+        asyncio.run(prompt_test.run(2))
+
+
+@pytest.mark.parametrize("replacement", ["process", "target"])
+def test_prompt_rejects_replacement(prompt_test, monkeypatch, replacement):
+    def handler(_):
+        if replacement == "process":
+            store.set_running({"pid": 123, "run_id": "replacement"})
+        else:
+            prompt_test.proxy.target = lambda: None
+        return httpx.Response(200, json={"choices": [{"message": {"content": "old answer"}}]})
+
+    inference(monkeypatch, handler)
+    with pytest.raises(v.VerificationError, match="changed"):
+        asyncio.run(prompt_test.run(2))
+
+
+@pytest.mark.parametrize("body", [{}, [], {"choices": []}, {"choices": [{"message": {"content": ""}}]},
+                                 {"choices": [{"message": {"content": ["invalid"]}}]}])
+def test_prompt_rejects_invalid_generated_text(prompt_test, monkeypatch, body):
+    inference(monkeypatch, lambda _: httpx.Response(200, json=body))
+    with pytest.raises(v.VerificationError, match="invalid JSON or no generated text"):
+        asyncio.run(prompt_test.run(2))
+
+
+def test_prompt_retains_reasoning_only_and_length_result(prompt_test, monkeypatch):
+    inference(monkeypatch, lambda _: httpx.Response(200, json={"choices": [{
+        "message": {"reasoning_content": "thinking"}, "finish_reason": "length"}]}))
+    result = asyncio.run(prompt_test.run(2))
+    assert result["message"] == {"reasoning_content": "thinking"} and result["finish_reason"] == "length"
+
+
+def test_prompt_has_overall_deadline_and_rejects_overlap(prompt_test, monkeypatch):
+    async def scenario():
+        started = asyncio.Event()
+
+        async def handler(_):
+            started.set()
+            await asyncio.sleep(5)
+            pytest.fail("inference should be cancelled")
+
+        inference(monkeypatch, handler)
+        first = asyncio.create_task(prompt_test.run(1))
+        await asyncio.wait_for(started.wait(), 2)
+        with pytest.raises(v.VerificationError, match="already running"):
+            await prompt_test.run(1)
+        with pytest.raises(v.VerificationTimeout, match="may still finish"):
+            await first
+        assert not prompt_test.lock.locked()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", [401, 429, 500])
+def test_prompt_reports_upstream_errors_without_retry(prompt_test, monkeypatch, status):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(status, json={"error": "upstream failure"})
+
+    inference(monkeypatch, handler)
+    with pytest.raises(v.VerificationError, match=f"HTTP {status}"):
+        asyncio.run(prompt_test.run(2))
+    assert len(calls) == 1

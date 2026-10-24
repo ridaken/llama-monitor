@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/select'
 import { basename } from '@/lib/utils'
 import type { LauncherController } from '@/hooks/useLauncher'
+import { TestPrompt } from '@/components/TestPrompt'
 
 export function LauncherFeedback({
   launcher,
@@ -79,7 +80,13 @@ export function LaunchStatus({ launcher }: { launcher: LauncherController }) {
   )
 }
 
-export function LaunchControls({ launcher }: { launcher: LauncherController }) {
+export function LaunchControls({
+  launcher,
+  online,
+}: {
+  launcher: LauncherController
+  online: boolean
+}) {
   const {
     state,
     gamingBlocked,
@@ -125,6 +132,7 @@ export function LaunchControls({ launcher }: { launcher: LauncherController }) {
           <Terminal />
           Console
         </Button>
+        <TestPrompt disabled={!online || gamingBlocked} />
       </div>
       {state && !state.binary_valid && (
         <p className="text-xs text-amber-300">

@@ -116,8 +116,15 @@ def main():
             eventually(lambda: request("/health", inference=True)["status"] == "ok")
             assert cli("smoke", "--timeout", "10")["message"]["content"] == "smoke response"
             assert not cli("proxy", "status")["enabled"]
+            direct = cli("test-prompt", "--timeout", "10")
+            assert direct["route"] == "direct" and direct["message"]["content"] == "smoke response"
+            assert direct["request_id"] is None and cli("requests", "list")["items"] == []
             cli("proxy", "smoke", expected=1)
             assert cli("proxy", "settings", "--enabled", "on")["listening"]
+            probe = cli("test-prompt", "--timeout", "10")
+            assert probe["route"] == "proxy"
+            eventually(lambda: cli("requests", "show", probe["request_id"])["state"] == "complete")
+            assert "FizzBuzz" in cli("requests", "show", probe["request_id"])["request_text"]
             probe = cli("proxy", "smoke", "--stream", "--timeout", "10")
             assert probe["response"]["choices"][0]["content"] == "smoke response"
             assert probe["first_chunk_seconds"] < probe["elapsed_seconds"] - 0.1

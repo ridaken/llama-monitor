@@ -51,7 +51,8 @@ from processes import discover_registered
 from instance import backend_lock
 from windows_startup import WindowsStartup
 from background import log_config as background_log_config
-from verification import ManagedVerification, SmokeRequest, VerificationError, VerificationTimeout
+from verification import (ManagedVerification, SmokeRequest, InferenceTest, TestPromptRequest,
+                          VerificationError, VerificationTimeout)
 from proxy import Proxy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -184,6 +185,7 @@ def build_app(args) -> FastAPI:
 
     proxy = Proxy(db, proxy_target, host=getattr(args, "proxy_host", None) or getattr(args, "host", "127.0.0.1"),
                   port=getattr(args, "proxy_port", 8501), dashboard_port=getattr(args, "port", 8500))
+    inference_test = InferenceTest(verification, proxy)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -209,6 +211,15 @@ def build_app(args) -> FastAPI:
 
     app = FastAPI(title="llama-monitor", lifespan=lifespan)
     app.state.proxy = proxy
+
+    @app.post("/api/inference/test")
+    async def test_prompt(body: TestPromptRequest):
+        try:
+            return await inference_test.run(body.timeout)
+        except VerificationTimeout as exc:
+            return JSONResponse({"error": str(exc)}, status_code=504)
+        except (VerificationError, RuntimeError, OSError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
 
     @app.get("/api/proxy/state")
     async def get_proxy_state():

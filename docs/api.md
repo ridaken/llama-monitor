@@ -122,6 +122,16 @@ Launcher state fields:
 | --- | --- | --- |
 | `GET /api/launcher/readiness` | None | `{state, ready, run_id, pid, reason}`. States: `stopped`, `loading`, `ready`, `failed`, `blocked`. Normally HTTP 200 even when not ready. Verifies managed identity, listener ownership, and a fresh inference `/health`; switching/recovery blocks it. |
 | `POST /api/launcher/smoke` | JSON object, e.g. `{}`; optional `timeout`, positive finite seconds ≤300, default 60 | `{run_id, elapsed_seconds, message, finish_reason, usage}` after one managed chat completion. HTTP 409 for verification/inference failure, 504 for deadline, 422 for invalid/missing typed body. Checks that the managed run remains unchanged. |
+| `POST /api/inference/test` | JSON object, e.g. `{}`; optional positive finite `timeout` ≤300, default 120 seconds | Sends one fixed Python FizzBuzz chat request to the current managed or external target. Uses the actual proxy listener when enabled, otherwise goes directly upstream. Returns `{route, target, model, run_id, prompt, message, elapsed_seconds, finish_reason, usage, request_id}`. Nullable model/run/usage/request ID fields depend on the upstream and route. HTTP 409 for unavailable/loading/changed targets, overlapping tests, unavailable enabled proxy, or inference failure; 504 for deadline; 422 for invalid/missing typed body. |
+
+The test prompt uses temperature 0, `max_tokens: 2048`, and `stream: false`.
+It never starts a model, retries inference, or bypasses an enabled proxy. Managed
+targets require readiness and listener ownership; external targets require a
+fresh healthy `/health` response. Tests return nonempty answer or reasoning text;
+`finish_reason: "length"` and reasoning-only results do not establish a complete
+FizzBuzz answer. Proxy capture settings apply normally, and the proxy request ID
+can be used with `/api/requests/{id}`. Direct tests do not create proxy records.
+Timeouts close the request connection, but computation may still finish upstream.
 
 Readiness is for the managed primary, not an external watch target. Example:
 
