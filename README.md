@@ -5,11 +5,11 @@ shadcn/ui interface. The **Monitor**, **Manage**, and **History** views keep liv
 status visible while you move between them.
 It can **launch and manage** llama-server for you (browse to a `.gguf`, set
 flags, Launch / Stop / Restart, and save/load named configurations), and shows,
-live (1s refresh):
+live (about 1s while active, 3s while idle, plus request time):
 
 - **Model loaded** — name, context size, slot usage, KV-cache usage as
   `tokens / n_ctx (percent)`
-- **Throughput** — prompt (pp) and decode tokens/sec, with a 60s smoothed decode
+- **Throughput** — prompt (pp) and decode tokens/sec, with a 60-sample smoothed decode
   sparkline (with Y-axis), speculative-decode efficiency, and last-prefill timing
 - **Slots** — per-slot state (idle / prefill / generating), context fill, prompt
   length and tokens generated
@@ -25,14 +25,54 @@ live (1s refresh):
 - **Activity history** — sortable, filterable generations observed in the log,
   retained in local SQLite until you clear them
 
+Designed to run on the **same machine** as llama-server and the GPUs.
+
+## Contents
+
+- [How it works](#how-it-works)
+- [Docker installation](#install-with-docker-compose-recommended)
+- [Native Python installation](#native-python-installation-alternative)
+- [Launch and manage](#launch--manage-llama-server)
+- [Hardware memory and layer placement](#hardware-memory-and-layer-placement)
+- [Activity history](#activity-history)
+- [Moonlight gaming mode](#automatic-moonlight-gaming-mode-native-windows--apollo)
+- [Windows startup](#automatic-windows-startup-native-installation)
+- [Data sources](#how-it-gets-the-data) and [adaptive polling](#polling-log-driven-when-idle-no-console-spam)
+- [CLI quick start](#command-line-verification), [full CLI reference](docs/cli.md), and [HTTP API reference](docs/api.md)
+- [Startup troubleshooting](#model-startup-troubleshooting)
+- [Development and tests](#development)
+
+## How it works
+
+The browser and [CLI](docs/cli.md) talk to the same Python/FastAPI backend. It
+starts one managed primary llama-server, or watches a server you started yourself.
+Model/slot data comes from llama-server HTTP endpoints; a background log reader
+collects startup allocations and generation timings and stores activity in local
+SQLite. NVML supplies NVIDIA GPU telemetry, and psutil supplies RAM/process data.
+There is no cloud account or model download step.
+
+**Monitor** combines model controls, saved configurations, and telemetry.
+**Manage** holds executable selection and native Windows integrations.
+**History** explores saved generations and optional prompts. Log collection and
+Windows coordination run without an open browser; live chart samples are kept in
+the browser and restart on reload. The browser retains up to 60 samples per trend,
+with a three-sample average for decode speed, so the displayed time span varies
+with activity, missing readings, and response time.
+
+The monitor's [control API](docs/api.md) normally uses port 8500. Inference clients
+send requests directly to llama-server's OpenAI-compatible `/v1` API, normally port
+8001 for a managed model. The monitor does not proxy inference requests.
+
 ### Speculative decoding (MTP / draft)
 
 If the server runs with speculative decoding (e.g. `--spec-type draft-mtp`), the
 Throughput panel shows **accepted tokens per step, per sequence** (≈1 means
 speculation isn't helping; up to `spec_draft_n_max + 1` is ideal). If speculation
-isn't in use, the section shows a "disabled — MTP not in use" notice instead.
-
-Designed to run on the **same machine** as llama-server and the GPUs.
+isn't detected, the section shows a disabled notice instead. Live efficiency is
+estimated from generated-token changes and decode calls, normalized by busy
+sequences; the newest complete logged generation supplies exact last-request
+acceptance/mean-length figures when available. This explains the displayed
+efficiency; it does not enable speculation for the model.
 
 ## Install with Docker Compose (recommended)
 
@@ -140,8 +180,9 @@ deletes saved settings, history, prompts, and logs; it does not delete host mode
 GPU fields depend on NVIDIA's available telemetry; WSL may omit utilization,
 temperature, power, or per-process details. Model memory split uses the managed
 server's logs rather than matching container process IDs against host NVML IDs.
-The image defaults llama.cpp logging to verbosity 4 so allocation details are
-available; lowering verbosity through launch flags can hide those details.
+For managed launches, the launcher defaults logging to verbosity 5 when supported
+and not explicitly overridden; see [layer placement](#hardware-memory-and-layer-placement).
+Lowering verbosity through launch flags can hide allocation details.
 **Docker system memory** describes RAM visible to the Linux environment (the
 Docker VM on Windows), not Windows host RAM. The reported process RSS belongs to
 the managed container process. No host process namespace is required.
@@ -174,48 +215,23 @@ in Docker. `launch --config-file PATH` reads an unsaved JSON configuration in th
 existing configuration format; `--config-file -` reads JSON from stdin. The JSON
 file is read where the CLI runs, so use stdin to pass a host file into Docker.
 
-Additional commands are `configs show NAME`, `restart [--wait]`, `wait --backend`,
-`wait --ready`, `gaming status`, and `startup status`. History supports `--model`,
-`--state`, `--from-ts`, `--to-ts`, `--sort`, `--order`, `--limit`, and `--cursor`;
-pass the returned `next_cursor` to fetch another page. `logs` returns a snapshot
-of complete lines from the API's bounded initial log window (including a final
-unterminated line after an early crash), rather than following
-the log indefinitely. See `python cli.py --help` and each command's `--help`.
-Managed history uses the launch alias (or model filename) immediately, so filtering
-by model works after launch/restart even when no dashboard or stats request runs.
+With a native backend, run `python cli.py ...` from the checkout and its Python
+environment. `--url` overrides `LLAMA_MONITOR_URL`; the default is
+`http://127.0.0.1:8500`. The CLI connects to an already running backend and never
+prompts. Add `--json` for a machine-readable result and inspect the exit code.
 
-With a native backend, run `python cli.py ...` from the checkout. Set `--url` or
-`LLAMA_MONITOR_URL` to its URL (default `http://127.0.0.1:8500`). `--url` takes
-precedence; inherited HTTP proxy settings are ignored for these direct requests.
-Inside Docker the default URL reaches the backend regardless of published host
-port settings. The CLI does not start the backend or install Windows integrations.
+`status` confirms backend availability even if no model runs. Launch/restart
+confirm process startup; `--wait` verifies the same managed run owns its port and
+passes a fresh health check. `smoke` sends one short chat completion and consumes
+inference resources. It verifies the managed primary, not external watch targets
+or embedding-only servers.
 
-`status` succeeds when the backend answers, even when no model is running.
-`wait --backend` checks backend availability only. `launch` and `restart` confirm
-process startup; add `--wait` or use `wait --ready` to verify the managed process
-owns its inference port and its model health check succeeds. A replaced process,
-early exit, or pending gaming transition fails verification. `smoke` explicitly
-sends a short, nonstreaming request with a 16-token output limit and accepts
-generated answer or reasoning text; it reports completion details, elapsed time,
-and token usage when provided. It consumes inference resources and can add a
-history record. It currently verifies the managed primary chat model, not an
-external watch target or an embedding-only server.
-
-Commands never prompt. JSON mode writes exactly one object to stdout:
-`{"ok": true, "data": ...}` or
-`{"ok": false, "error": {"message": "...", "code": 1}}`.
-Exit codes are **0** success, **1** operation/verification failure, **2** invalid
-arguments or configuration input, **3** connection/protocol failure, **4** timeout,
-and **130** interruption. `--help` prints ordinary help text. Without `--json`,
-results are formatted JSON (plain console text for logs), and errors go to stderr.
-`doctor` also includes its full report in `data` on failure (exit 1), and prints
-that report to stdout in text mode so the evidence remains available.
-
-Requests default to 10 seconds (`--request-timeout`), waits to 300 seconds
-(`--timeout`), and smoke to 60 seconds (`--timeout`, maximum 300). Waits use a
-deadline and fail on a changed model run. Only backend-availability waits retry
-connection errors; no mutation or inference request is automatically retried.
-A timed-out submitted operation may still complete; inspect state before retrying.
+See the **[CLI reference](docs/cli.md)** for every command/option, configuration
+JSON and stdin examples, history pagination, response envelopes, exit codes,
+timeouts, and scripting limitations. The **[HTTP API reference](docs/api.md)**
+covers all backend routes, including dashboard-only controls, response fields,
+errors, and integration access requirements. This API is separate from the
+managed server's inference API.
 
 ### Model startup troubleshooting
 
@@ -259,46 +275,7 @@ Docker Desktop, and the Windows NVIDIA driver current. See
 [Docker's WSL guidance](https://docs.docker.com/desktop/features/wsl/best-practices/)
 and [GPU prerequisites](https://docs.docker.com/desktop/features/gpu/).
 
-### Isolated development tests
-
-Run the existing automated tests, then the Compose smoke harness to rebuild and
-exercise the bundled CLI against a fake inference server. The harness uses a
-unique project, temporary model directory, dedicated data volume, and free host
-ports; it cleans up only its own resources and needs no real GGUF or GPU:
-
-```sh
-python -m pytest -q tests
-python tests/container_smoke.py
-# Optional NVIDIA image/integration check:
-python tests/container_smoke.py --gpu
-```
-
-For native testing, use a separate data directory and backend port. PowerShell:
-
-```powershell
-$env:LLAMA_MONITOR_DATA_DIR = "$PWD/test-results/cli-native"
-python app.py --test-mode --port 8765
-# In another terminal:
-python cli.py --url http://127.0.0.1:8765 wait --backend --json
-python cli.py --url http://127.0.0.1:8765 status --json
-```
-
-Test mode rejects the default native data directory, skips persisted process
-adoption, gaming recovery, and Windows startup actions, disables integration
-changes, and stops test-owned models on graceful backend shutdown. Inherited
-`LLAMA_URL`, `LLAMA_LOG`, and `LLAMA_PROMPTS_DIR` are ignored; explicit watch
-arguments still apply. Choose an unused model port in test configurations. For
-real-model verification, use an existing local model only when that test is in
-scope; it can compete with other processes for GPU memory. Tests with the fake
-server do not establish real GPU or model compatibility.
-
-The backend adds `GET /api/launcher/readiness` for fresh managed-model checks
-and `POST /api/launcher/smoke` with an optional `timeout` in seconds. Smoke
-returns HTTP 409 for verification failures, 504 for deadlines, and 422 for invalid
-input. Existing `/api/health` remains a backend-only probe. These endpoints use
-the same trusted-network access model as existing launcher controls.
-
-### Per-device model layers
+## Hardware memory and layer placement
 
 Hardware reports **Assigned model layers: N / total** for the main model's
 transformer layers. The output layer appears separately. Counts come from complete
@@ -311,9 +288,9 @@ For future managed launches, the launcher adds `--log-verbosity 5` when the
 installed binary advertises it. Debug logging increases log volume. Explicit
 `-lv`, `--verbosity`, `--log-verbosity`, verbose/log-disable flags and logging
 environment overrides take precedence. For example, add `--log-verbosity 3` to
-reduce logs; detailed placement may then be unavailable. The old container level-4
-default is replaced by the launcher's capability-checked default; user-provided
-`LLAMA_ARG_LOG_VERBOSITY` is honored at any value.
+reduce logs; detailed placement may then be unavailable. User-provided
+`LLAMA_ARG_LOG_VERBOSITY` is honored at any value; `LLAMA_ARG_LOG_DISABLE` and
+`LLAMA_ARG_LOG_VERBOSE` also prevent automatic verbosity injection.
 
 An already loaded or externally launched model needs retained debug startup records;
 otherwise Hardware shows **Unavailable** with restart guidance. External launch
@@ -323,13 +300,10 @@ PCI bus ID or UUID, not CUDA ordinal; unmatched logged devices get placement-onl
 cards rather than borrowing another GPU's telemetry. Extra device cards wrap and
 scroll inside Hardware in desktop Fit mode; Comfortable uses natural page scrolling.
 
-`GET /api/stats` (also `cli.py stats --json`) adds `layer_placement` with `status`
-(`available`, `shared`, `loading`, `no_model`, `unavailable`), `reason`, and `devices`.
-Complete records also include `total_layers` and `output_device` (null when absent).
-Each device has `label`, `layers`, optional `name`/`identity`, and `gpu_index` only
-when matched to an NVML device. Zero is published only with a complete transformer
-layer map. Existing `gpu`, `sysmem`, and `split` fields are unchanged. Placement
-uses the existing log follower and makes no additional inference HTTP requests.
+The [stats API reference](docs/api.md#telemetry-and-health) documents memory sources,
+layer-placement states, and device identity fields. Use `python cli.py stats --json`
+to inspect them from scripts. Zero layer counts require a complete transformer
+layer map; placement adds no inference HTTP requests.
 
 ## Launch & manage llama-server
 
@@ -349,12 +323,14 @@ Gaming, and startup settings:
   warning linking to **Manage**, where Browse lets you pick the executable.
   Your choice is persisted across sessions.
 - **Pick a model** — paste a path to a `.gguf` or **Browse** the filesystem.
-- **Set flags** — add flags from the dropdown, which lists **every flag your
-  installed llama-server supports** (parsed live from `llama-server --help`,
-  alphabetised), or type any flag/value by hand. Each known flag shows a
+- **Set flags** — add flags from the dropdown, parsed from your installed
+  `llama-server --help` and alphabetised, or type any flag/value by hand. Help
+  results are cached per binary build; a bundled common-flag list is used if the
+  binary is missing, fails, or produces no parseable help. Each known flag shows a
   description next to it — whether picked from the dropdown or typed as a custom
   flag — and its value hint becomes the input placeholder. The Flags section
-  **collapses** (click the Flags label) to free up dashboard space; collapsed
+  also lets you disable a flag without deleting it from the saved configuration.
+  It **collapses** (click the Flags label) to free up dashboard space; collapsed
   it shows a short preview and count — expand it to edit the complete list.
   Flags start collapsed on each dashboard load.
 - **Console** — the **Console** button opens a live, auto-scrolling view of
@@ -540,12 +516,19 @@ stale model allocations and inference gauges are cleared.
 | System RAM + llama-server RSS | `psutil` |
 | Console output | the server's log file, tailed |
 | Supported flags + descriptions | parsed from `llama-server --help` |
-| GPU portion of the split | NVML per-process VRAM, matched to the llama-server PID |
-| CPU portion of the split | parsed from llama-server's startup log (optional) |
+| GPU memory attribution | NVML per-process VRAM when available; otherwise logged buffers or a logged-baseline estimate |
+| CPU buffer allocations | parsed from llama-server's startup log (optional), distinct from live RAM/RSS |
+| Per-device model layers | complete final startup assignments, matched by PCI bus ID or UUID |
 
-llama.cpp has no runtime "GB per device" API, so the GPU split is read live from
-NVML per-process memory, and the CPU/system-RAM portion is read from the startup
-log if you pass `--llama-log`.
+Memory attribution prefers NVML per-process VRAM when available, then logged
+buffer allocations, then an estimate from free-VRAM changes since the logged
+baseline. That estimate can be skewed by other processes. Windows WDDM commonly
+lacks NVML per-process VRAM; Docker deliberately avoids matching container PIDs
+to host NVML PIDs. Logged weights/context/work buffers describe allocations,
+including mapped or pinned CPU buffers, rather than current physical residency.
+System RAM/RSS and total GPU usage are separate live readings. Layer assignments
+come from complete final startup records, not memory sizes or requested offload
+flags; provisional memory-fit trials and draft/projector layers are excluded.
 
 ## Polling: log-driven when idle (no console spam)
 
@@ -555,8 +538,9 @@ Hitting llama-server's HTTP endpoints wakes its request loop, which at idle logs
 polling** while idle:
 
 - **Idle** → only the log file (+ NVML for GPUs) is read; **llama-server is not
-  contacted at all**, so its loop is never woken (no idle log spam). Polled every
-  3 s.
+  contacted for routine stats after the initial bootstrap scrape**, so its loop
+  is not repeatedly woken. The browser refreshes backend stats about every 3 s;
+  explicit readiness/smoke checks still contact the managed server.
 - A request appears in the log (`launch_slot … processing task`) → switches to
   **active**: polls `/slots` every 1 s for live KV fill and decode tok/s, until
   `/slots` reports idle again.
@@ -573,8 +557,9 @@ the current deferred-request count from `/metrics`.
 
 The log parsing is intentionally tolerant (matches short, stable substrings and
 treats any unrecognised growth as activity). If no `--llama-log` is set, or the
-file is unavailable, it **falls back** to HTTP adaptive polling (1 s active /
-3 s idle, with a lightweight `/slots`-only idle poll). The header shows
+file is unavailable, it **falls back** to HTTP adaptive polling (about 1 s active /
+3 s idle, with `/slots` and cached metrics at idle; model properties can also
+refresh). These intervals are delays after a response, not fixed deadlines. The header shows
 `idle (log)` or `idle (http)` so you can see which mode is active.
 
 ## Activity history
@@ -610,11 +595,9 @@ files and the raw server log retain their existing lifecycles. JSONL currently
 wraps ordinary server messages, so history does not claim to include every HTTP
 request, status code, or response body.
 
-For local integrations, `GET /api/history` accepts `model`, `state`, `from_ts`,
-`to_ts`, `sort` (`time`, `duration`, `prompt_tokens`, `generated_tokens`),
-`order` (`asc` or `desc`), `limit`, and an opaque `cursor` returned as
-`next_cursor`. `DELETE /api/history` clears saved generations while retaining
-the log cursor. `GET /api/history/{id}/prompt` returns saved text when available.
+See the [history API](docs/api.md#history-and-prompts) and
+[CLI history filters](docs/cli.md#history-filters) for querying records, pagination,
+prompt retrieval, and clearing stored history.
 
 ## Automatic Windows startup (native installation)
 
@@ -657,12 +640,24 @@ boot and GPU availability must be checked after installation and a reboot.
 Use this installation for Windows Apollo integration, Windows startup setup, or
 direct access to host processes and paths. Docker is the primary installation.
 
+**Prerequisites:** Git, Python (CI tests 3.11, 3.12, and 3.13), a separately installed
+`llama-server` binary for your platform, and an existing `.gguf` model. Put the
+binary on `PATH` or select it in **Manage**. Choose a llama.cpp build suitable for
+your hardware; NVIDIA telemetry requires working NVIDIA drivers/NVML, while
+CPU-only monitoring and inference do not require a GPU. No Node.js installation
+is needed to use the committed UI. From PowerShell:
+
 ```powershell
-cd C:\Users\Tom\Documents\Repos\llama-monitor
+git clone https://github.com/ridaken/llama-monitor.git
+cd llama-monitor
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
+
+If you already cloned the repository, start with `cd` into that checkout. On
+Linux/macOS use `python3 -m venv .venv` and `source .venv/bin/activate`, then the
+same pip/backend commands. Apollo and automatic Windows startup remain Windows-only.
 
 ### Run
 
@@ -675,38 +670,35 @@ Then use the **Monitor** view to start llama-server (see above). That's
 the simplest path — the panel sets `--metrics` and `--log-file` for you.
 
 The built React interface is included in `static/app`, so running the dashboard
-requires only the Python dependencies above. To develop or rebuild the UI, use
-Node.js and pnpm:
-
-```powershell
-cd frontend
-pnpm install --frozen-lockfile
-pnpm dev        # UI at http://127.0.0.1:5173; run python app.py separately for /api
-pnpm build      # writes the committed assets in ../static/app
-pnpm test:e2e   # Chromium browser tests against an isolated FastAPI instance
-```
+requires only the Python dependencies. Node.js and pnpm are needed only for
+[UI development](#development).
 
 ### Watching a server you started yourself (optional)
 
 You can still launch llama-server manually and just point the dashboard at it.
-Two things must then be present on the **llama-server** side:
+For full telemetry and history, configure these on the **llama-server** side:
 
-- `--metrics` — enables the `/metrics` endpoint (throughput, KV usage). Without
-  it those panels stay blank (the dashboard tells you so).
-- `--log-file <path>` — writes the startup log, which is the **only** source for
-  the per-device memory split on Windows (NVML cannot report per-process VRAM
-  under the WDDM driver model used by consumer GPUs).
+- `--metrics` — enables scrape-window throughput/request gauges. Slots can
+  still supply live decode speed and estimated KV occupancy without it.
+- `--log-file <path>` — supplies startup allocations, layer assignments, exact
+  per-generation timings, history, and log-driven idle detection. For detailed
+  layer placement, retain debug startup records (for example `--log-verbosity 5`
+  if supported). Windows WDDM commonly lacks per-process VRAM telemetry, making
+  the log especially useful for memory attribution.
+
+Create the log directory before starting the external server. This example uses
+Windows Command Prompt syntax for the server and PowerShell for the monitor:
 
 ```bat
 llama-server.exe ^
   -m "...\Models\Qwen3.6-27B-UD-Q5_K_XL.gguf" ^
   -c 86000 --fit on -fa on --port 8001 ^
   --metrics ^
-  --log-file "C:\Users\Tom\Desktop\llama-server-scripts\llama.log"
+  --log-file "C:\llama-logs\llama.log"
 ```
 
 ```powershell
-python app.py --llama-url http://localhost:8001 --llama-log "C:\Users\Tom\Desktop\llama-server-scripts\llama.log"
+python app.py --llama-url http://localhost:8001 --llama-log "C:\llama-logs\llama.log"
 ```
 
 ### Options
@@ -718,17 +710,82 @@ python app.py --llama-url http://localhost:8001 --llama-log "C:\Users\Tom\Deskto
 | `--llama-prompts-dir` | _(none)_ | Directory written by an external server's `--log-prompts-dir` flag |
 | `--port` | `8500` | Port for this dashboard |
 | `--host` | `127.0.0.1` | Bind address |
+| `--background` | Off | Use rotating `backend.log` in the data directory; Windows startup pairs this with `pythonw.exe` for a hidden process. It does not install a task or daemonize a foreground Python process by itself. |
+| `--test-mode` | Off | Require a separate data directory, skip process adoption/integration automation, and stop test-owned models at shutdown; see [isolated tests](#isolated-development-tests). |
 
 Env vars `LLAMA_URL`, `LLAMA_LOG`, `LLAMA_PROMPTS_DIR`, and `MONITOR_PORT` are also honored.
 `LLAMA_MONITOR_DATA_DIR` overrides the native `~/.llama-monitor` storage directory.
 The image sets it to `/data` and sets `LLAMA_MONITOR_CONTAINER=1` for container
 behavior; native installations should leave container mode unset.
 
+## Development
+
+Use a separate Python environment and install the test dependencies from the
+repository root:
+
+```sh
+python -m pip install -r requirements-dev.txt
+```
+
+CI exercises Python 3.11, 3.12, and 3.13; its frontend checks use Node.js 24 and
+pnpm 11.25.0 (also pinned by `frontend/package.json`). To develop or rebuild the UI:
+
+```sh
+cd frontend
+pnpm install --frozen-lockfile
+pnpm dev          # UI at http://127.0.0.1:5173; run the backend separately
+pnpm format:check
+pnpm build        # typechecks and writes committed assets in ../static/app
+pnpm exec playwright install chromium
+pnpm test:e2e     # Chromium tests against an isolated FastAPI instance
+```
+
+The dev proxy targets a backend on port 8500. Use separate test data when running
+that backend; never reuse normal native data for test mode. Commit rebuilt
+`static/app` assets with UI changes. Browser tests cover UI behavior; CLI checks
+cover backend controls and verification. The following commands run from the
+repository root, after returning from `frontend`.
+
+### Isolated development tests
+
+Run the existing automated tests, then the Compose smoke harness to rebuild and
+exercise the bundled CLI against a fake inference server. The harness uses a
+unique project, temporary model directory, dedicated data volume, and free host
+ports; it cleans up only its own resources and needs no real GGUF or GPU:
+
+```sh
+python -m pytest -q tests
+python tests/container_smoke.py
+# Optional NVIDIA image/integration check:
+python tests/container_smoke.py --gpu
+```
+
+For native testing, use a separate data directory and backend port. PowerShell:
+
+```powershell
+$env:LLAMA_MONITOR_DATA_DIR = "$PWD/test-results/cli-native"
+python app.py --test-mode --port 8765
+# In another terminal:
+python cli.py --url http://127.0.0.1:8765 wait --backend --json
+python cli.py --url http://127.0.0.1:8765 status --json
+```
+
+Test mode rejects the default native data directory, skips persisted process
+adoption, gaming recovery, and Windows startup actions, disables integration
+changes, and stops test-owned models on graceful backend shutdown. Inherited
+`LLAMA_URL`, `LLAMA_LOG`, and `LLAMA_PROMPTS_DIR` are ignored; explicit watch
+arguments still apply. Choose an unused model port in test configurations. For
+real-model verification, use an existing local model only when that test is in
+scope; it can compete with other processes for GPU memory. Tests with the fake
+server do not establish real GPU or model compatibility.
+
 ## Notes
 
-- Throughput needs llama-server's `--metrics` flag; without it the dashboard
-  still shows the model and GPU stats.
-- NVIDIA only (NVML). AMD/ROCm would need a different backend.
+- Scrape-window throughput gauges need llama-server's `--metrics` flag; live
+  decode speed comes from slots and last-request timings from logs.
+- GPU telemetry supports NVIDIA through NVML. AMD/ROCm or Metal telemetry would
+  need another collector; CPU-only use is supported. The supplied Docker images
+  offer CPU/CUDA inference, not ROCm or Metal.
 - The launcher manages a single llama-server instance at a time.
 - Settings and saved launch configs live in `~/.llama-monitor/state.json`; the
   managed log for launched servers is `~/.llama-monitor/llama-server.log`.
