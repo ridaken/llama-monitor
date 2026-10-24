@@ -104,9 +104,10 @@ def main():
             with urllib.request.urlopen(f"http://127.0.0.1:{env['DASHBOARD_PORT']}{asset}") as response:
                 assert response.status == 200
             source = (ROOT / "tests/fixtures/llama-server-smoke").read_text()
-            exec_python("from pathlib import Path; p=Path('/tmp/llama-server-smoke'); "
+            # Keep the fake executable across Compose container recreation.
+            exec_python("from pathlib import Path; p=Path('/data/llama-server-smoke'); "
                         f"p.write_text({source!r}); p.chmod(0o755)")
-            request("/api/launcher/settings", {"llama_server_path": "/tmp/llama-server-smoke"})
+            request("/api/launcher/settings", {"llama_server_path": "/data/llama-server-smoke"})
             config = {"name": "smoke", "model_path": "/models/smoke.gguf", "port": 8001, "flags": []}
             request("/api/configs", config)
             assert cli("configs", "list")["configs"][0] == config
@@ -147,8 +148,10 @@ def main():
             # Opt-in startup must work without a browser or a manual launch.
             request("/api/configs/default", {"name": "smoke"})
             request("/api/launcher/settings", {"autostart_default_model": True})
-            run("restart")
+            run("up", "--force-recreate", "--wait", "--wait-timeout", "60", "-d")
             cli("wait", "--backend", "--timeout", "30")
+            startup_state = request("/api/launcher/state")
+            assert startup_state["autostart_error"] is None, startup_state["autostart_error"]
             assert cli("wait", "--ready", "--timeout", "30")["ready"]
             auto_run = cli("status")["launcher"]["status"]["run_id"]
             assert auto_run and auto_run != restarted
