@@ -200,7 +200,7 @@ export function History({ active }: { active: boolean }) {
         ? 'Log unavailable; live monitoring uses HTTP until it returns.'
         : coverage.prompts_configured
           ? 'Observed generations and native prompt files. Unmatched prompts appear as Prompt only.'
-          : 'Observed generations. Enable prompt logging in Manage to save prompt text.'
+          : 'Observed generations. Enable Save prompts in Activity history in the model configuration to save native prompt text.'
   const models = result?.models || []
   const rows = result?.items || []
   return (

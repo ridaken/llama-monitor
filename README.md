@@ -52,8 +52,9 @@ SQLite. NVML supplies NVIDIA GPU telemetry, and psutil supplies RAM/process data
 There is no cloud account or model download step.
 
 **Monitor** combines model controls, saved configurations, and telemetry.
-**Manage** holds executable selection and native Windows integrations.
-**History** explores saved generations and optional prompts. Log collection and
+**Manage** holds executable selection, proxy controls, and native Windows integrations.
+**Requests** explores captured proxy request/response pairs.
+**History** explores saved generations and optional native prompts. Log collection and
 Windows coordination run without an open browser; live chart samples are kept in
 the browser and restart on reload. The browser retains up to 60 samples per trend,
 with a three-sample average for decode speed, so the displayed time span varies
@@ -61,7 +62,8 @@ with activity, missing readings, and response time.
 
 The monitor's [control API](docs/api.md) normally uses port 8500. Inference clients
 send requests directly to llama-server's OpenAI-compatible `/v1` API, normally port
-8001 for a managed model. The monitor does not proxy inference requests.
+8001 for a managed model. Optionally enable the inference proxy on port 8501 to
+capture request/response pairs while preserving direct inference access.
 
 ### Speculative decoding (MTP / draft)
 
