@@ -19,9 +19,19 @@ def temp_state(monkeypatch, tmp_path):
 
 def test_defaults_when_no_file():
     s = store.get_settings()
+    assert s["autostart_default_model"] is False
     assert s["default_port"] == store.DEFAULT_PORT
     assert s["llama_server_path"] is None
     assert store.list_configs() == []
+
+
+def test_autostart_migration_and_persistence(temp_state):
+    (temp_state / "state.json").write_text('{"settings": {"default_config": "old"}}')
+    assert store.get_settings()["autostart_default_model"] is False
+    for enabled in (True, False):
+        store.update_settings(autostart_default_model=enabled)
+        assert store.get_settings()["autostart_default_model"] is enabled
+        assert json.loads((temp_state / "state.json").read_text())["settings"]["autostart_default_model"] is enabled
 
 
 def test_update_settings_persists(temp_state):

@@ -104,9 +104,10 @@ def main():
             with urllib.request.urlopen(f"http://127.0.0.1:{env['DASHBOARD_PORT']}{asset}") as response:
                 assert response.status == 200
             source = (ROOT / "tests/fixtures/llama-server-smoke").read_text()
-            exec_python("from pathlib import Path; p=Path('/tmp/llama-server-smoke'); "
+            # Keep the fake executable across Compose container recreation.
+            exec_python("from pathlib import Path; p=Path('/data/llama-server-smoke'); "
                         f"p.write_text({source!r}); p.chmod(0o755)")
-            request("/api/launcher/settings", {"llama_server_path": "/tmp/llama-server-smoke"})
+            request("/api/launcher/settings", {"llama_server_path": "/data/llama-server-smoke"})
             config = {"name": "smoke", "model_path": "/models/smoke.gguf", "port": 8001, "flags": []}
             request("/api/configs", config)
             assert cli("configs", "list")["configs"][0] == config
@@ -144,6 +145,24 @@ def main():
             run("up", "--wait", "--wait-timeout", "60", "-d")
             assert exec_python("from pathlib import Path; print(Path('/data/smoke-stopped').read_text())") == "graceful"
             assert cli("status")["launcher"]["status"]["state"] == "stopped"
+            # Opt-in startup must work without a browser or a manual launch.
+            request("/api/configs/default", {"name": "smoke"})
+            request("/api/launcher/settings", {"autostart_default_model": True})
+            run("up", "--force-recreate", "--wait", "--wait-timeout", "60", "-d")
+            cli("wait", "--backend", "--timeout", "30")
+            startup_state = request("/api/launcher/state")
+            assert startup_state["autostart_error"] is None, startup_state["autostart_error"]
+            assert cli("wait", "--ready", "--timeout", "30")["ready"]
+            auto_run = cli("status")["launcher"]["status"]["run_id"]
+            assert auto_run and auto_run != restarted
+            assert cli("status")["launcher"]["settings"]["autostart_default_model"] is True
+            assert cli("stop")["status"]["state"] == "stopped"
+            # Allow several coordinator/poll intervals to expose accidental retries.
+            stopped_until = time.monotonic() + 4
+            while time.monotonic() < stopped_until:
+                assert cli("status")["launcher"]["status"]["state"] == "stopped"
+                time.sleep(.25)
+            request("/api/launcher/settings", {"autostart_default_model": False})
             # A loader may fail before --log-file is initialized, without even
             # a trailing newline. Both the console and doctor must retain it.
             exec_python("from pathlib import Path; p=Path('/tmp/llama-server-crash'); "

@@ -67,6 +67,7 @@ export type LauncherState = {
     models_dir: string | null
     default_port: number
     default_config: string | null
+    autostart_default_model: boolean
   }
   binary_valid: boolean
   configs: Config[]
@@ -79,6 +80,7 @@ export type LauncherState = {
     adopted?: boolean
   }
   managed_log: string
+  autostart_error: string | null
   gaming?: GamingState
 }
 export type KnownFlag = {

@@ -34,6 +34,28 @@ def test_launcher_state_shape(client):
     body = r.json()
     assert set(["settings", "binary_valid", "configs", "status", "managed_log"]) <= body.keys()
     assert body["status"]["state"] == "stopped"
+    assert body["autostart_error"] is None
+
+
+def test_autostart_setting_round_trip_without_immediate_launch(client, monkeypatch):
+    monkeypatch.setattr(launcher.ServerManager, "launch", lambda *args: pytest.fail("must wait for restart"))
+    for enabled in (True, False):
+        response = client.post("/api/launcher/settings", json={"autostart_default_model": enabled})
+        assert response.status_code == 200
+        assert response.json()["settings"]["autostart_default_model"] is enabled
+        assert client.get("/api/launcher/state").json()["settings"]["autostart_default_model"] is enabled
+    # Partial settings updates must preserve the preference.
+    client.post("/api/launcher/settings", json={"autostart_default_model": True})
+    assert client.post("/api/launcher/settings", json={"models_dir": "models"}).json()["settings"]["autostart_default_model"] is True
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "true", "false", [], {}])
+def test_autostart_setting_rejects_non_booleans_atomically(client, value):
+    response = client.post("/api/launcher/settings", json={"autostart_default_model": value, "default_port": 9000})
+    assert response.status_code == 400
+    assert "boolean" in response.json()["error"]
+    assert store.get_settings()["autostart_default_model"] is False
+    assert store.get_settings()["default_port"] == 8001
 
 
 @pytest.mark.parametrize("process_bytes", [None, 1024])

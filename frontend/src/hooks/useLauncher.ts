@@ -67,6 +67,8 @@ const cleanFlag = (flag: Flag) => ({
 })
 export function useLauncher() {
   const [state, setState] = useState<LauncherState | null>(null)
+  const [savingAutostart, setSavingAutostart] = useState(false)
+  const [autostartSaveError, setAutostartSaveError] = useState('')
   const [knownFlags, setKnownFlags] = useState<KnownFlag[]>([])
   const [flagSource, setFlagSource] = useState('bundled')
   const [loaded, setLoaded] = useState<Config | null>(null)
@@ -394,6 +396,23 @@ export function useLauncher() {
       notify(`Could not set default: ${(error as Error).message}`, true)
     }
   }
+  const saveAutostart = async (enabled: boolean) => {
+    setSavingAutostart(true)
+    setAutostartSaveError('')
+    try {
+      applyState(
+        await post<LauncherState>('/api/launcher/settings', {
+          autostart_default_model: enabled,
+        }),
+      )
+    } catch (error) {
+      setAutostartSaveError(
+        `Could not save setting: ${(error as Error).message}`,
+      )
+    } finally {
+      setSavingAutostart(false)
+    }
+  }
   const deleteConfig = async () => {
     if (!loaded) return
     try {
@@ -625,6 +644,9 @@ export function useLauncher() {
     update,
     selectConfig,
     toggleDefault,
+    saveAutostart,
+    savingAutostart,
+    autostartSaveError,
     deleteConfig,
     save,
     saveAs,

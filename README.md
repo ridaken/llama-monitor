@@ -107,11 +107,12 @@ included in this setup.
   `docker compose down` also removes the container and network. Closing a browser
   tab leaves the model running.
 - `docker compose up -d` starts the dashboard again. Saved configurations and
-  history remain, but **models must be launched manually after every container
-  restart**. A default configuration fills the form without loading the model.
+  history remain. By default, models must be launched manually after every
+  container restart. Enable **Manage → Model startup → Start the default model
+  when llama-monitor starts** to launch your saved default automatically.
 - `restart: unless-stopped` restarts the dashboard after failures and Docker
   restarts. Configure Docker to start with your operating system separately;
-  this does not automatically launch a model.
+  model loading follows the **Model startup** setting above.
 - To update, pull repository changes and run
   `docker compose build --pull` followed by `docker compose up -d`.
   The `LLAMA_CPP_IMAGE` build argument, also configurable in `.env`, selects an
@@ -382,6 +383,21 @@ mark the selected config as your default (it's flagged with a ★ in the list).
 When you open the dashboard and **no server is running**, the default config is
 loaded into the form automatically, ready to Launch. Click the ★ again to clear
 it; deleting a config also clears it if it was the default.
+
+**Automatic model startup.** In **Manage → Model startup**, check **Start the
+default model when llama-monitor starts** to launch that saved configuration
+once whenever the backend starts, even without a browser. This setting defaults
+to off, works in native and Docker installations, and takes effect on the next
+backend startup. Turning it off keeps the default form prefill. Changing the
+checkbox does not start or stop a model immediately.
+
+An existing managed model, an explicit `--llama-url` watch target, or pending
+Windows/gaming recovery takes priority. Active Moonlight gaming or an unknown
+gaming connection state skips that startup attempt. No default means nothing
+launches. Skipped and failed launches are not retried; failures appear in Manage
+and existing console/diagnostics remain available. Browser reloads, manual Stop,
+and model crashes do not trigger another launch. Windows startup's captured-model
+restoration remains separate and keeps its existing behavior.
 
 > With the native installation, a launched server is left running when you close the dashboard — it's spawned
 > detached, so killing/Ctrl+C-ing the dashboard (or closing its console) does

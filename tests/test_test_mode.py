@@ -25,6 +25,10 @@ def test_default_data_directory_is_rejected(isolated, monkeypatch):
 
 
 def test_seeded_automation_is_inert_and_test_owned_models_stop(isolated, monkeypatch):
+    store.upsert_config({"name": "default", "model_path": "model.gguf", "port": 8001})
+    store.set_default_config("default")
+    store.update_settings(autostart_default_model=True)
+    monkeypatch.setattr(app_module.ServerManager, "launch", lambda *args: pytest.fail("must not autostart"))
     store.set_running({"pid": 123, "config": {}})
     store.update_gaming(transition={"phase": "restoring", "servers": []}, enabled=True)
     store.update_startup(installed=True, pending={"operation": "never-consume"})

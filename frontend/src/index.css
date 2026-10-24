@@ -681,11 +681,15 @@ button:disabled {
   }
   .app-fit #gaming-panel {
     grid-column: 1;
-    grid-row: 1 / span 2;
+    grid-row: 1 / span 3;
+  }
+  .app-fit #model-startup-panel {
+    grid-column: 2;
+    grid-row: 2;
   }
   .app-fit #startup-panel {
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 3;
   }
 }
 

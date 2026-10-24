@@ -17,11 +17,13 @@ export const launcherState = {
     models_dir: 'C:/Models',
     default_port: 8001,
     default_config: 'Qwen test',
+    autostart_default_model: false,
   },
   binary_valid: true,
   configs: [config],
   status: { state: 'stopped', adopted: false, config_name: null },
   managed_log: 'C:/test/llama-server.log',
+  autostart_error: null,
 }
 
 export const gamingState = {
