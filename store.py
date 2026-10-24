@@ -62,6 +62,7 @@ def _default_state() -> dict:
             # Name of the config to auto-load on page open when no server is
             # running (the user's "default / favourite"). None when unset.
             "default_config": None,
+            "autostart_default_model": False,
         },
         "configs": [],
         # The server this dashboard last launched, so a restarted dashboard can
@@ -146,6 +147,8 @@ def get_settings() -> dict:
 
 def update_settings(**changes) -> dict:
     """Merge the given keys into settings and persist. Returns new settings."""
+    if "autostart_default_model" in changes and type(changes["autostart_default_model"]) is not bool:
+        raise ValueError("autostart_default_model must be a boolean")
     return update_state(lambda state: state["settings"].update(
         {k: v for k, v in changes.items() if v is not None}))["settings"]
 

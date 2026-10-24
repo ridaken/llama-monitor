@@ -144,6 +144,22 @@ def main():
             run("up", "--wait", "--wait-timeout", "60", "-d")
             assert exec_python("from pathlib import Path; print(Path('/data/smoke-stopped').read_text())") == "graceful"
             assert cli("status")["launcher"]["status"]["state"] == "stopped"
+            # Opt-in startup must work without a browser or a manual launch.
+            request("/api/configs/default", {"name": "smoke"})
+            request("/api/launcher/settings", {"autostart_default_model": True})
+            run("restart")
+            cli("wait", "--backend", "--timeout", "30")
+            assert cli("wait", "--ready", "--timeout", "30")["ready"]
+            auto_run = cli("status")["launcher"]["status"]["run_id"]
+            assert auto_run and auto_run != restarted
+            assert cli("status")["launcher"]["settings"]["autostart_default_model"] is True
+            assert cli("stop")["status"]["state"] == "stopped"
+            # Allow several coordinator/poll intervals to expose accidental retries.
+            stopped_until = time.monotonic() + 4
+            while time.monotonic() < stopped_until:
+                assert cli("status")["launcher"]["status"]["state"] == "stopped"
+                time.sleep(.25)
+            request("/api/launcher/settings", {"autostart_default_model": False})
             # A loader may fail before --log-file is initialized, without even
             # a trailing newline. Both the console and doctor must retain it.
             exec_python("from pathlib import Path; p=Path('/tmp/llama-server-crash'); "

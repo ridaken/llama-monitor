@@ -14,6 +14,7 @@ target to watch if a server is already running.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import hmac
 import ipaddress
@@ -148,8 +149,8 @@ def build_app(args) -> FastAPI:
     # `python app.py` (default URL) still auto-reconnects.
     cli_target_explicit = (args.llama_url or "") != DEFAULT_LLAMA_URL
     if runtime.containerized() or test_mode:
-        # Container PID namespaces are recreated; a new container never adopts
-        # a persisted numeric PID or automatically loads a saved model.
+        # Container PID namespaces are recreated; never adopt a persisted PID.
+        # A saved model is loaded only by the separate opt-in startup decision.
         store.set_running(None)
     elif not cli_target_explicit:
         adopted = manager.adopt()
@@ -170,7 +171,9 @@ def build_app(args) -> FastAPI:
     async def lifespan(app: FastAPI):
         follower.start()
         if not runtime.containerized() and not test_mode:
-            gaming.start()
+            await asyncio.to_thread(gaming.start, autostart_default=not cli_target_explicit)
+        elif not test_mode and not cli_target_explicit:
+            await asyncio.to_thread(gaming.start_default_model)
         # Native launches outlive the backend; container launches stop with it.
         try:
             yield
@@ -548,6 +551,7 @@ def build_app(args) -> FastAPI:
             "gaming": gaming.state(),
             "runtime": runtime.info(),
             "test_mode": test_mode,
+            "autostart_error": gaming.autostart_error,
         }
 
     @app.get("/api/launcher/state")
@@ -622,11 +626,16 @@ def build_app(args) -> FastAPI:
     @app.post("/api/launcher/settings")
     async def post_settings(request: Request) -> JSONResponse:
         body = await request.json()
-        store.update_settings(
-            llama_server_path=body.get("llama_server_path"),
-            models_dir=body.get("models_dir"),
-            default_port=body.get("default_port"),
-        )
+        try:
+            store.update_settings(
+                llama_server_path=body.get("llama_server_path"),
+                models_dir=body.get("models_dir"),
+                default_port=body.get("default_port"),
+                **({"autostart_default_model": body["autostart_default_model"]}
+                   if "autostart_default_model" in body else {}),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         return JSONResponse(launcher_state())
 
     @app.get("/api/browse")

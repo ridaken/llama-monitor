@@ -28,6 +28,8 @@ class GamingCoordinator:
         self.wake_event = threading.Event()
         self.thread = None
         self.startup_results = None
+        self.autostart_error = None
+        self._default_start_decided = False
         self.generation = 0
         self.connected = None
         self.integration_error = None
@@ -129,10 +131,42 @@ class GamingCoordinator:
                           if s["id"] == "primary" and s["status"] != "cancelled"), None)
             return copy.deepcopy(entry["original"].get("config")) if entry else None
 
-    def start(self):
+    def start_default_model(self):
+        """Make one startup decision, serialized with manual lifecycle actions."""
+        with self.lock:
+            if self._default_start_decided:
+                return
+            self._default_start_decided = True
+            state = store.load_state()
+            settings = state["settings"]
+            if settings.get("autostart_default_model") is not True:
+                return
+            config = next((c for c in state["configs"]
+                           if c.get("name") == settings.get("default_config")), None)
+            if not config or self.transition:
+                return
+            try:
+                # An unadopted record also takes priority: never replace a
+                # possibly live process whose ownership could not be verified.
+                if self.manager.snapshot() or store.get_running():
+                    return
+                if state["gaming"]["enabled"]:
+                    try:
+                        clients = self.apollo.connected(state["gaming"])
+                    except Exception:
+                        return  # Unknown gaming state must not consume VRAM.
+                    if clients:
+                        return
+                self.launch(copy.deepcopy(config))
+            except Exception as exc:
+                self.autostart_error = f"Could not start the default model: {exc}"
+
+    def start(self, *, autostart_default=False):
         if self.startup_results:
             self.startup_results()
         self.schedule_boot_models()
+        if autostart_default:
+            self.start_default_model()
         self.thread = threading.Thread(target=self._run, name="gaming-coordinator", daemon=True)
         self.thread.start()
 

@@ -20,7 +20,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, "unprotect", lambda value: base64.b64decode(value).decode())
     monkeypatch.setattr(app_module, "certificate_fingerprint", lambda url: "verified-local-certificate")
     monkeypatch.setattr(app_module.ApolloClient, "connected", lambda self, settings: [])
-    monkeypatch.setattr(gaming.GamingCoordinator, "start", lambda self: None)
+    monkeypatch.setattr(gaming.GamingCoordinator, "start", lambda self, **kwargs: None)
     args = argparse.Namespace(llama_url=app_module.DEFAULT_LLAMA_URL, llama_log=None, port=8500, host="127.0.0.1")
     with TestClient(app_module.build_app(args), client=("127.0.0.1", 50000)) as c:
         yield c

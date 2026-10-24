@@ -148,7 +148,7 @@ def test_smoke_deadline_cancels_slow_response(probe, monkeypatch):
 
 def test_api_contracts_and_validation(probe, monkeypatch):
     monkeypatch.setattr(app_module, "ManagedVerification", lambda *args: probe)
-    monkeypatch.setattr(app_module.GamingCoordinator, "start", lambda _: None)
+    monkeypatch.setattr(app_module.GamingCoordinator, "start", lambda _, **kwargs: None)
     args = argparse.Namespace(llama_url="http://127.0.0.1:9", llama_log=None, port=8500)
     inference(monkeypatch, lambda _: httpx.Response(200, json={"choices": [{"message": {"content": "OK"}}]}))
     # Use Starlette's client without replacing httpx.Client in the transport fixture.
