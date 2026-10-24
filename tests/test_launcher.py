@@ -3,6 +3,7 @@ stop / restart lifecycle. A fake Popen stands in for a real llama-server so the
 tests never load a model or open a port.
 """
 
+import copy
 import os
 import sys
 import types
@@ -200,9 +201,38 @@ def fake_popen(monkeypatch):
         captured["argv"] = argv
         captured["kwargs"] = kw
         captured["proc"] = FakeProc(argv, **kw)
+        captured["generation"] = captured.get("generation", 0) + 1
+        captured["identity"] = {
+            "pid": captured["proc"].pid,
+            "created_at": float(captured["generation"]),
+            "executable": argv[0],
+            "argv": list(argv),
+            "cwd": kw.get("cwd"),
+        }
         return captured["proc"]
 
+    def capture(pid):
+        proc = captured["proc"]
+        if pid != proc.pid or proc.poll() is not None:
+            raise launcher.psutil.NoSuchProcess(pid)
+        return copy.deepcopy(captured["identity"])
+
+    def matches(record):
+        try:
+            current = capture(record["pid"])
+        except launcher.psutil.NoSuchProcess:
+            return False
+        return all(record[key] == current[key] for key in ("pid", "created_at", "executable"))
+
     monkeypatch.setattr(launcher.subprocess, "Popen", _popen)
+    # Help parsing has its own tests; subprocess.run would also use fake Popen
+    # and replace the captured model process while preparing a restart.
+    monkeypatch.setattr(launcher.flags_mod, "get_server_flags",
+                        lambda binary: {"source": "bundled", "flags": []})
+    # FakeProc's numeric PID may belong to an unrelated process on the host.
+    # Keep identity capture/checks in the same fake process model as Popen.
+    monkeypatch.setattr(launcher, "capture_process", capture)
+    monkeypatch.setattr(launcher, "identity_matches", matches)
     return captured
 
 
@@ -227,6 +257,33 @@ def test_explicit_stop_reports_stopped_not_exited(good_settings, fake_popen):
     assert status["state"] == "stopped"
 
 
+def test_fake_lifecycle_does_not_inspect_host_processes(good_settings, fake_popen, monkeypatch):
+    def host_process(pid):
+        pytest.fail(f"Fake lifecycle inspected host PID {pid}")
+    monkeypatch.setattr(launcher.psutil, "Process", host_process)
+    mgr = ServerManager(lambda *a: None)
+    config = {"name": "c1", "model_path": _gguf(good_settings), "port": 9001}
+    mgr.launch(config)
+    first_identity = store.get_running()["identity"]
+    assert first_identity == fake_popen["identity"]
+    assert mgr.restart()["state"] == "running"
+    assert store.get_running()["identity"]["created_at"] != first_identity["created_at"]
+    assert mgr.stop()["state"] == "stopped"
+    assert store.get_running() is None
+
+
+def test_changed_process_identity_preserves_ownership(good_settings, fake_popen):
+    mgr = ServerManager(lambda *a: None)
+    mgr.launch({"name": "c1", "model_path": _gguf(good_settings), "port": 9001})
+    original = store.get_running()
+    fake_popen["identity"]["created_at"] += 1
+    with pytest.raises(LaunchError, match="identity changed"):
+        mgr.stop()
+    assert fake_popen["proc"].poll() is None
+    assert mgr.status()["state"] == "running"
+    assert store.get_running() == original
+
+
 def test_crash_reports_exited_with_code(good_settings, fake_popen):
     mgr = ServerManager(lambda *a: None)
     mgr.launch({"name": "c1", "model_path": _gguf(good_settings), "port": 9001})
@@ -243,7 +300,7 @@ def test_failed_stop_keeps_process_and_persisted_ownership(good_settings, fake_p
     def denied():
         raise PermissionError("access denied")
     monkeypatch.setattr(fake_popen["proc"], "terminate", denied)
-    with pytest.raises(LaunchError, match="Failed to stop"):
+    with pytest.raises(LaunchError, match="Failed to stop llama-server: access denied"):
         mgr.stop()
     assert mgr.status()["state"] == "running"
     assert store.get_running()["pid"] == fake_popen["proc"].pid
