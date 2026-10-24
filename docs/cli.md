@@ -56,6 +56,12 @@ except for the aggregation performed by `status` and additions from `--wait`.
 | --- | --- |
 | `status` | Reads health, launcher state, and fresh managed readiness; returns `{backend, launcher, readiness}`. Exit 0 means the backend answered, even with a stopped or unready model. Readiness can contact the inference health endpoint. |
 | `stats` | Returns [telemetry](api.md#telemetry-and-health) from `GET /api/stats`. May poll the monitored inference server; cached/log-driven data is not proof of readiness. |
+| `proxy status` | Reads proxy settings, bind address, target, listener state and capture errors. |
+| `proxy settings [--enabled on\|off] [--log-prompts on\|off] [--log-responses on\|off]` | Reads settings without options; otherwise persists partial updates. Enabling starts the listener; capture toggles apply to new requests. Inspect `listening` and `listener_error` after enabling. |
+| `proxy smoke [--stream] [--timeout SECONDS] [--api-key-env NAME]` | Sends a fixed 16-token chat probe through the actual proxy listener, for a managed or external target. Deadline defaults to 60 seconds, maximum 300. Returns monitor request ID, elapsed/first-chunk seconds and response. Optional key is read from the CLI environment, never persisted. |
+| `requests list [--model NAME] [--endpoint PATH] [--state STATE] [--from-ts TS] [--to-ts TS] [--cursor CURSOR] [--limit N]` | Lists proxy request metadata, newest first. Limit 1–200, default 50. Dates are Unix seconds; upper bound is exclusive. `next_cursor` provides the next page. Payloads are excluded. |
+| `requests show ID` | Fetches one request with saved prompt/settings, response, truncation flags, usage and outcome. |
+| `requests clear --yes` | Deletes proxy request history and content. Requires `--yes`, does not clear log-derived Activity history. |
 | `doctor` | Returns the [diagnostic report](api.md#diagnostics). Runs bounded device/NVIDIA probes without loading a model; a failed check gives exit 1 and retains the report in `data`. |
 | `configs list` | Returns `{configs: [...]}` with saved configurations. |
 | `configs show NAME` | Returns one configuration matched by its exact name; missing names fail with exit 1. |
@@ -236,3 +242,15 @@ errors are not retried. Mutations and inference are never automatically retried.
 Smoke uses its own overall deadline; its HTTP timeout is that value plus two
 seconds, rather than `--request-timeout`. A timed-out submitted operation may
 still finish. Inspect state before resubmitting it.
+
+
+## Proxy verification addresses
+
+`proxy smoke` reaches the inference listener directly, using the management
+backend hostname and advertised proxy port over HTTP. When that is not the
+published client address, set `LLAMA_MONITOR_PROXY_URL` to a root URL such as
+`http://server:9001`, without `/v1`. This is useful for remapped Docker ports or a
+TLS reverse proxy. Commands run inside the standard container need no override.
+API keys supplied with `--api-key-env NAME` must exist in that CLI process's
+environment. The smoke result does not prove durable capture: use the returned
+`request_id` with `requests show` and bounded polling until the record is terminal.

@@ -214,8 +214,8 @@ export function History({ active }: { active: boolean }) {
                 Activity history
               </CardTitle>
               <CardDescription className="mt-2">
-                Observed generations and saved prompts. Response text is never
-                saved.
+                Log-derived generations and saved native prompts. Proxy request
+                and response content is available in Requests.
               </CardDescription>
             </div>
             <Button

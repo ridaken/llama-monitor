@@ -10,6 +10,7 @@ services:
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${DASHBOARD_PORT:-8500}:8500"
       - "${BIND_ADDRESS:-0.0.0.0}:${INFERENCE_PORT:-8001}:8001"
+      - "${PROXY_BIND_ADDRESS:-127.0.0.1}:${PROXY_PORT:-8501}:8501"
     volumes:
       - monitor-data:/data
       - type: bind

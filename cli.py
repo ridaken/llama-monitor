@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import math
 import os
 from pathlib import Path
 import sys
 import time
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 import httpx
 
@@ -64,6 +65,24 @@ def parser():
     logs.add_argument("--tail", type=int, default=100)
     smoke = commands.add_parser("smoke", parents=[common])
     smoke.add_argument("--timeout", type=positive, default=60, help="Overall probe deadline, at most 300 seconds")
+    proxy = commands.add_parser("proxy", parents=[common]).add_subparsers(dest="action", required=True, parser_class=Parser)
+    proxy.add_parser("status", parents=[common])
+    settings = proxy.add_parser("settings", parents=[common])
+    for option in ("enabled", "log-prompts", "log-responses"):
+        settings.add_argument(f"--{option}", choices=("on", "off"))
+    probe = proxy.add_parser("smoke", parents=[common])
+    probe.add_argument("--stream", action="store_true")
+    probe.add_argument("--timeout", type=positive, default=60)
+    probe.add_argument("--api-key-env", metavar="NAME", help="Read the upstream API key from this environment variable")
+    requests = commands.add_parser("requests", parents=[common]).add_subparsers(dest="action", required=True, parser_class=Parser)
+    listing = requests.add_parser("list", parents=[common])
+    for option in ("model", "endpoint", "state", "cursor"):
+        listing.add_argument(f"--{option}")
+    for option in ("from-ts", "to-ts"):
+        listing.add_argument(f"--{option}", type=float)
+    listing.add_argument("--limit", type=int, default=50)
+    requests.add_parser("show", parents=[common]).add_argument("id")
+    requests.add_parser("clear", parents=[common]).add_argument("--yes", action="store_true")
     for name in ("configs", "history", "gaming", "startup"):
         group = commands.add_parser(name, parents=[common])
         subs = group.add_subparsers(dest="action", required=True, parser_class=Parser)
@@ -154,6 +173,26 @@ def configs(client, name=None):
 
 def execute(args, client):
     command = args.command
+    if command == "proxy":
+        if args.action == "status":
+            return client.request("GET", "/api/proxy/state")
+        if args.action == "settings":
+            changes = {key: getattr(args, key) == "on" for key in ("enabled", "log_prompts", "log_responses")
+                       if getattr(args, key) is not None}
+            return client.request("POST", "/api/proxy/settings", json=changes) if changes else client.request("GET", "/api/proxy/state")
+        return proxy_smoke(args, client)
+    if command == "requests":
+        if args.action == "show":
+            return client.request("GET", f"/api/requests/{quote(args.id, safe='')}")
+        if args.action == "clear":
+            if not args.yes:
+                raise CLIError("Clearing request history requires --yes.", 2)
+            return client.request("DELETE", "/api/requests")
+        if not 1 <= args.limit <= 200:
+            raise CLIError("--limit must be between 1 and 200.", 2)
+        params = {key: getattr(args, key) for key in ("model", "endpoint", "state", "cursor", "from_ts", "to_ts", "limit")
+                  if getattr(args, key) is not None}
+        return client.request("GET", "/api/requests", params=params)
     if command == "doctor":
         return client.request("GET", "/api/launcher/doctor")
     if command == "status":
@@ -208,6 +247,64 @@ def execute(args, client):
             raise CLIError("Smoke timeout must be at most 300 seconds.", 2)
         return client.request("POST", "/api/launcher/smoke", json={"timeout": args.timeout}, timeout=args.timeout + 2)
     raise CLIError("Unknown command.", 2)
+
+
+def proxy_smoke(args, client):
+    from proxy_capture import ResponseCapture
+    if args.timeout > 300:
+        raise CLIError("Smoke timeout must be at most 300 seconds.", 2)
+    headers = {}
+    if args.api_key_env:
+        key = os.environ.get(args.api_key_env)
+        if not key:
+            raise CLIError("The API key environment variable is empty or missing.", 2)
+        headers["Authorization"] = "Bearer " + key
+    state = client.request("GET", "/api/proxy/state")
+    if not state.get("enabled") or not state.get("listening"):
+        raise CLIError(state.get("listener_error") or "Proxy is disabled or not listening.")
+    # Reach a remote proxy through the same host as its management backend.
+    # Published Docker ports can differ, so allow an explicit URL override.
+    base = os.environ.get("LLAMA_MONITOR_PROXY_URL")
+    if not base:
+        address = client.http.base_url.copy_with(scheme="http", port=state["port"], path="/")
+        base = str(address).rstrip("/")
+    started = time.monotonic()
+    captured = ResponseCapture(True, started)
+    first_chunk = None
+    async def probe():
+        nonlocal first_chunk
+        async with httpx.AsyncClient(timeout=args.timeout, trust_env=False, follow_redirects=False) as inference:
+            async with inference.stream("POST", base.rstrip("/") + "/v1/chat/completions", headers=headers, json={
+                "messages": [{"role": "user", "content": "Reply with OK."}],
+                "temperature": 0, "max_tokens": 16, "stream": args.stream}) as response:
+                if response.status_code >= 400:
+                    raise CLIError(f"Proxy inference returned HTTP {response.status_code}.", 4 if response.status_code == 504 else 1)
+                identifier = response.headers.get("x-llama-monitor-request-id")
+                captured.sse = "text/event-stream" in response.headers.get("content-type", "")
+                if captured.sse != args.stream:
+                    raise CLIError("Proxy returned an unexpected streaming format.", 3)
+                async for chunk in response.aiter_bytes():
+                    if first_chunk is None:
+                        first_chunk = time.monotonic() - started
+                    captured.feed(chunk)
+                return identifier
+
+    async def timed_probe():
+        return await asyncio.wait_for(probe(), timeout=args.timeout)
+
+    try:
+        identifier = asyncio.run(timed_probe())
+        text = captured.finish()
+        if time.monotonic() - started >= args.timeout:
+            raise CLIError("Proxy inference verification timed out.", 4)
+        if not identifier or not captured.done or captured.invalid or captured.failed or captured.first_token is None:
+            raise CLIError("Proxy inference returned no generated content or an incomplete response.")
+        return {"request_id": identifier, "stream": args.stream, "first_chunk_seconds": first_chunk,
+                "elapsed_seconds": time.monotonic() - started, "response": json.loads(text)}
+    except (httpx.TimeoutException, asyncio.TimeoutError) as exc:
+        raise CLIError("Proxy inference timed out; the upstream may still finish.", 4) from exc
+    except httpx.HTTPError as exc:
+        raise CLIError("Cannot connect to the proxy or read its response.", 3) from exc
 
 
 def main(argv=None):

@@ -192,3 +192,31 @@ def test_real_entrypoint_has_help_and_json_error():
     assert subprocess.run([sys.executable, "cli.py", "--help"], capture_output=True).returncode == 0
     result = subprocess.run([sys.executable, "cli.py", "--json", "unknown"], capture_output=True, text=True)
     assert result.returncode == 2 and json.loads(result.stdout)["ok"] is False and result.stderr == ""
+
+
+def test_proxy_settings_and_request_commands(invoke):
+    code, _, calls = invoke(["proxy", "settings", "--enabled", "on", "--log-responses", "off"], lambda _: {})
+    assert code == 0 and calls[0].url.path == "/api/proxy/settings"
+    assert json.loads(calls[0].content) == {"enabled": True, "log_responses": False}
+    code, _, calls = invoke(["proxy", "settings"], lambda _: {})
+    assert code == 0 and calls[0].method == "GET"
+    code, _, calls = invoke(["requests", "show", "identifier"], lambda _: {})
+    assert code == 0 and calls[0].url.path == "/api/requests/identifier"
+    code, _, calls = invoke(["requests", "clear", "--yes"], lambda _: {"deleted": 2})
+    assert code == 0 and calls[0].method == "DELETE"
+    code, _, calls = invoke(["requests", "list", "--model", "test", "--state", "cancelled"], lambda _: {})
+    assert code == 0 and calls[0].url.params["state"] == "cancelled"
+
+
+@pytest.mark.parametrize("arguments", [["requests", "clear"], ["requests", "list", "--limit", "0"],
+    ["proxy", "settings", "--enabled", "yes"], ["proxy", "smoke", "--timeout", "301"],
+    ["proxy", "smoke", "--api-key-env", "MISSING_PROXY_TEST_KEY"]])
+def test_proxy_input_errors_never_contact_backend(invoke, arguments, monkeypatch):
+    monkeypatch.delenv("MISSING_PROXY_TEST_KEY", raising=False)
+    code, _, calls = invoke(arguments, lambda _: pytest.fail("must not contact backend"))
+    assert code == 2 and not calls
+
+
+def test_proxy_smoke_rejects_disabled_listener(invoke):
+    code, _, calls = invoke(["proxy", "smoke"], lambda _: {"enabled": False, "listening": False})
+    assert code == 1 and len(calls) == 1

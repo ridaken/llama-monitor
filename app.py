@@ -52,6 +52,7 @@ from instance import backend_lock
 from windows_startup import WindowsStartup
 from background import log_config as background_log_config
 from verification import ManagedVerification, SmokeRequest, VerificationError, VerificationTimeout
+from proxy import Proxy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(HERE, "static")
@@ -108,6 +109,7 @@ def build_app(args) -> FastAPI:
         "llama": LlamaCollector(args.llama_url),
         "log_path": args.llama_log,
         "port": urlparse(args.llama_url).port,
+        "proxy_target": {"url": args.llama_url, "managed": False},
     }
     state = {"active": False, "activity_seq": follower.snapshot()["activity_seq"]}
 
@@ -130,6 +132,8 @@ def build_app(args) -> FastAPI:
         follower.set_model(configured_model_name((record or {}).get("config") or {}))
         rt["log_path"] = log_path
         rt["port"] = port
+        rt["proxy_target"] = {"url": url, "managed": True, "run_id": (record or {}).get("run_id"),
+                              "model": configured_model_name((record or {}).get("config") or {})}
         state["active"] = False
         state["activity_seq"] = follower.snapshot()["activity_seq"]
         try:
@@ -167,9 +171,24 @@ def build_app(args) -> FastAPI:
         gaming.startup_results = windows_startup.consume_result
     verification = ManagedVerification(manager, gaming)
 
+    def proxy_target():
+        target = rt["proxy_target"].copy()
+        if gaming.state()["blocked"]:
+            return None
+        if target["managed"]:
+            status = manager.status()
+            record = store.get_running() or {}
+            if status["state"] != "running" or record.get("run_id") != target.get("run_id"):
+                return None
+        return target
+
+    proxy = Proxy(db, proxy_target, host=getattr(args, "proxy_host", None) or getattr(args, "host", "127.0.0.1"),
+                  port=getattr(args, "proxy_port", 8501), dashboard_port=getattr(args, "port", 8500))
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         follower.start()
+        await proxy.start()
         if not runtime.containerized() and not test_mode:
             await asyncio.to_thread(gaming.start, autostart_default=not cli_target_explicit)
         elif not test_mode and not cli_target_explicit:
@@ -178,6 +197,7 @@ def build_app(args) -> FastAPI:
         try:
             yield
         finally:
+            await proxy.close()
             gaming.close()
             try:
                 if runtime.containerized() or test_mode:
@@ -188,6 +208,43 @@ def build_app(args) -> FastAPI:
                 gpu.shutdown()
 
     app = FastAPI(title="llama-monitor", lifespan=lifespan)
+    app.state.proxy = proxy
+
+    @app.get("/api/proxy/state")
+    async def get_proxy_state():
+        return await proxy.state()
+
+    @app.post("/api/proxy/settings")
+    async def proxy_settings(request: Request):
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Proxy settings must be an object.")
+            return await proxy.configure(body)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.get("/api/requests")
+    def list_requests(model: str = "", endpoint: str = "", state: str = "", from_ts: float | None = None,
+                      to_ts: float | None = None, cursor: str | None = None, limit: int = 50):
+        if proxy.history is None:
+            return JSONResponse({"error": proxy.capture_error}, status_code=503)
+        try:
+            return {**proxy.history.list(model=model, endpoint=endpoint, state=state, from_ts=from_ts,
+                                        to_ts=to_ts, cursor=cursor, limit=limit), "capture_error": proxy.capture_error}
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.get("/api/requests/{request_id}")
+    def get_request(request_id: str):
+        record = proxy.history.get(request_id) if proxy.history else None
+        return record if record else JSONResponse({"error": "Request unavailable"}, status_code=404)
+
+    @app.delete("/api/requests")
+    def clear_requests():
+        if proxy.history is None:
+            return JSONResponse({"error": proxy.capture_error}, status_code=503)
+        return {"deleted": proxy.history.clear()}
 
     @app.get("/api/health")
     def health():
@@ -770,9 +827,13 @@ def main() -> None:
         help="Port for this dashboard (default: 8500)",
     )
     p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--proxy-host", default=os.environ.get("MONITOR_PROXY_HOST"), help="Proxy bind address (default: dashboard host)")
+    p.add_argument("--proxy-port", type=int, default=int(os.environ.get("MONITOR_PROXY_PORT", "8501")))
     p.add_argument("--background", action="store_true", help="Run without a console and log to ~/.llama-monitor/backend.log")
     p.add_argument("--test-mode", action="store_true", help="Use isolated data, disable integration automation, and stop test models on exit")
     args = p.parse_args()
+    if not 1 <= args.proxy_port <= 65535:
+        p.error("--proxy-port must be between 1 and 65535")
     if args.test_mode:
         try:
             validate_test_directory()

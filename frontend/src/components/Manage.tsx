@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Gaming } from '@/components/Gaming'
 import { Startup } from '@/components/Startup'
+import { ProxySettings } from '@/components/ProxySettings'
 import { LauncherFeedback } from '@/components/Launcher'
 import type { LauncherController } from '@/hooks/useLauncher'
 
@@ -93,6 +94,7 @@ export function Manage({ launcher }: { launcher: LauncherController }) {
         </CardContent>
       </Card>
 
+      <ProxySettings />
       <Gaming />
       <Startup />
     </div>
