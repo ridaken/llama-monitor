@@ -125,6 +125,48 @@ def upstream():
     thread.join()
 
 
+@pytest.mark.parametrize("enabled,prompts,responses", [(False, True, True), (True, True, True),
+                                                     (True, False, False)])
+def test_fixed_prompt_real_routing_and_capture(backend, upstream, enabled, prompts, responses):
+    api, _, _ = backend
+    api.post("/api/proxy/settings", json={"enabled": enabled, "log_prompts": prompts, "log_responses": responses})
+    result = api.post("/api/inference/test", json={"timeout": 5})
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["route"] == ("proxy" if enabled else "direct")
+    posts = [request for request in upstream[1] if request.get("raw")]
+    assert len(posts) == 1 and json.loads(posts[0]["raw"])["max_tokens"] == 2048
+    assert "FizzBuzz" in json.loads(posts[0]["raw"])["messages"][0]["content"]
+    assert body["message"]["content"] == "hello"
+    if enabled:
+        eventually(lambda: api.get(f"/api/requests/{body['request_id']}").json().get("state") == "complete")
+        row = api.get(f"/api/requests/{body['request_id']}").json()
+        assert (row["request_text"] is not None) == prompts
+        assert (row["response_text"] is not None) == responses
+        assert len(api.get("/api/requests").json()["items"]) == 1
+    else:
+        assert body["request_id"] is None
+        assert api.get("/api/requests").json()["items"] == []
+
+
+@pytest.mark.parametrize("timeout", [0, -1, 301, "nan", "inf"])
+def test_fixed_prompt_api_validates_deadline(backend, upstream, timeout):
+    api, _, _ = backend
+    assert api.post("/api/inference/test", json={"timeout": timeout}).status_code == 422
+    assert not any(request.get("raw") for request in upstream[1])
+
+
+def test_fixed_prompt_loading_external_target_does_not_send(backend, upstream, monkeypatch):
+    api, _, _ = backend
+    async def loading(self, url, **kwargs):
+        return httpx.Response(503, json={"status": "loading model"})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", loading)
+    result = api.post("/api/inference/test", json={})
+    assert result.status_code == 409 and "loading" in result.json()["error"]
+    assert not any(request.get("raw") for request in upstream[1])
+
+
 @pytest.fixture
 def backend(monkeypatch, tmp_path, upstream):
     monkeypatch.setattr(store, "HOME_DIR", str(tmp_path))

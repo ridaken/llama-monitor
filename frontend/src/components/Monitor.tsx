@@ -387,7 +387,10 @@ export function Monitor({
                   </span>
                 </Badge>
               </div>
-              <LaunchControls launcher={launcher} />
+              <LaunchControls
+                launcher={launcher}
+                online={!!d?.online && !monitor.failed}
+              />
             </div>
           </div>
           <ConfigurationPanel launcher={launcher} />

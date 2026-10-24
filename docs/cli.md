@@ -70,6 +70,7 @@ except for the aggregation performed by `status` and additions from `--wait`.
 | `stop` | Stops the managed primary server and cancels its pending restoration, if any. Returns launcher state. Does not stop an arbitrary external watch target. |
 | `wait (--backend \| --ready) [--timeout SECONDS]` | Exactly one condition is required. Backend mode returns health; ready mode returns readiness for the first observed managed run. Timeout defaults to 300 seconds. |
 | `smoke [--timeout SECONDS]` | Sends one short chat completion through the managed primary model. Returns `run_id`, `elapsed_seconds`, `message`, `finish_reason`, and `usage`. Default 60 seconds; positive finite maximum 300. Consumes inference resources and may create history. |
+| `test-prompt [--timeout SECONDS]` | Sends the same fixed Python FizzBuzz request as Monitor's **Test prompt** button. Uses the configured proxy when enabled, otherwise the current upstream directly, including external watch targets. Default 120 seconds; positive finite maximum 300. Returns route, target/model, reply, elapsed time, finish reason, optional usage and proxy request ID. Output limit is 2,048 tokens. An unavailable enabled proxy fails without direct fallback. |
 | `logs [--tail N]` | Returns a snapshot of the last N complete lines in the console API's bounded initial window; default 100, positive integer. Includes console metadata. Text mode prints only content. Does not follow logs indefinitely. A final unterminated startup line can be included after a crash. |
 | `history list [FILTERS]` | Returns a [history page](api.md#history-and-prompts), including `items`, `next_cursor`, `models`, `database_path`, and `log_status`. Filters are listed below. |
 | `gaming status` | Returns [gaming state](api.md#gaming-integration); it does not enable, install, or alter the integration. |
@@ -239,9 +240,9 @@ command. Each wait request is capped by the remaining deadline and
 Only `wait --backend` retries transport connection/timeout failures; protocol
 errors are not retried. Mutations and inference are never automatically retried.
 
-Smoke uses its own overall deadline; its HTTP timeout is that value plus two
-seconds, rather than `--request-timeout`. A timed-out submitted operation may
-still finish. Inspect state before resubmitting it.
+Smoke and test-prompt use their own overall deadlines; their HTTP timeout is
+that value plus two seconds, rather than `--request-timeout`. A timed-out
+submitted operation may still finish. Inspect state before resubmitting it.
 
 
 ## Proxy verification addresses

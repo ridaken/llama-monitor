@@ -99,8 +99,17 @@ def main():
                     cli("wait", "--backend", "--timeout", "10")
                     assert cli("status")["readiness"]["state"] == "stopped"
                     assert not cli("proxy", "status")["enabled"]
+                    direct = cli("test-prompt", "--timeout", "5")
+                    assert direct["route"] == "direct" and direct["request_id"] is None
+                    assert direct["message"]["content"] == "native answer"
+                    assert cli("requests", "list")["items"] == []
                     cli("proxy", "smoke", expected=1)
                     assert cli("proxy", "settings", "--enabled", "on")["listening"]
+                    probe = cli("test-prompt", "--timeout", "5")
+                    assert probe["route"] == "proxy"
+                    eventually(lambda: cli("requests", "show", probe["request_id"])["state"] == "complete")
+                    assert "FizzBuzz" in cli("requests", "show", probe["request_id"])["request_text"]
+                    assert cli("requests", "clear", "--yes")["deleted"] == 1
                     for streaming in (False, True):
                         args = ["--stream"] if streaming else []
                         probe = cli("proxy", "smoke", *args, "--timeout", "5")

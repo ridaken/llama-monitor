@@ -1,4 +1,4 @@
-"""Explicit probes of the managed model, independent of cached telemetry."""
+"""Explicit inference probes, independent of cached telemetry."""
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +15,14 @@ from launcher import LaunchError
 
 class SmokeRequest(BaseModel):
     timeout: float = Field(default=60, gt=0, le=300, allow_inf_nan=False)
+
+
+TEST_PROMPT = ("Write a concise Python 3 program that prints FizzBuzz for integers "
+               "1 through 100. Output only the code.")
+
+
+class TestPromptRequest(BaseModel):
+    timeout: float = Field(default=120, gt=0, le=300, allow_inf_nan=False)
 
 
 class VerificationError(RuntimeError):
@@ -137,3 +145,89 @@ class ManagedVerification:
             raise VerificationError("Inference returned no generated content.") from exc
         return {"run_id": snapshot["run_id"], "elapsed_seconds": time.monotonic() - started,
                 "message": message, "finish_reason": choice.get("finish_reason"), "usage": body.get("usage")}
+
+
+class InferenceTest:
+    """One explicit request through the current configured inference route."""
+
+    def __init__(self, verification, proxy):
+        self.verification = verification
+        self.proxy = proxy
+        self.lock = asyncio.Lock()
+
+    async def run(self, timeout):
+        if self.lock.locked():
+            raise VerificationError("A test prompt is already running. Wait for it to finish.")
+        async with self.lock:
+            try:
+                return await asyncio.wait_for(self._run(timeout), timeout=timeout)
+            except (asyncio.TimeoutError, httpx.TimeoutException) as exc:
+                raise VerificationTimeout("Test prompt timed out; the model may still finish the request.") from exc
+            except httpx.HTTPStatusError as exc:
+                raise VerificationError(f"Test prompt returned HTTP {exc.response.status_code}. Check the inference server or proxy.") from exc
+            except httpx.HTTPError as exc:
+                raise VerificationError("Cannot connect to the configured inference route or read its response.") from exc
+
+    async def _run(self, timeout):
+        started = time.monotonic()
+        target = await asyncio.to_thread(self.proxy.target)
+        if not target:
+            raise VerificationError("Inference target is stopped or switching.")
+        if not await self.proxy.validate_target(target["url"]):
+            raise VerificationError("Invalid inference target or proxy loop detected.")
+        state = await self.proxy.state()
+        route = "proxy" if state["enabled"] else "direct"
+        if route == "proxy" and not state["listening"]:
+            raise VerificationError(state.get("listener_error") or "The enabled proxy is not listening.")
+
+        snapshot = None
+        if target["managed"]:
+            ready = await asyncio.to_thread(self.verification.readiness)
+            if not ready["ready"]:
+                raise VerificationError(ready["reason"])
+            snapshot = await asyncio.to_thread(self.verification._snapshot)
+            if ready["run_id"] != target["run_id"] or snapshot["run_id"] != target["run_id"]:
+                raise VerificationError("Managed server changed before the test prompt.")
+
+        async def unchanged():
+            if await asyncio.to_thread(self.proxy.target) != target:
+                raise VerificationError("Inference target changed during the test prompt.")
+            if snapshot:
+                await asyncio.to_thread(self.verification._unchanged, snapshot)
+
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False, follow_redirects=False) as client:
+            if not target["managed"]:
+                health = await client.get(target["url"].rstrip("/") + "/health", timeout=min(timeout, 5))
+                if health.status_code != 200:
+                    raise VerificationError("Inference target is loading or unhealthy.")
+                try:
+                    if health.json().get("status") != "ok":
+                        raise ValueError("unhealthy")
+                except (ValueError, AttributeError) as exc:
+                    raise VerificationError("Inference target did not return a healthy status.") from exc
+            await unchanged()
+            # Wildcard listener addresses are bind addresses, not destinations.
+            host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(state["host"], state["host"])
+            host = f"[{host}]" if ":" in host else host
+            base = f"http://{host}:{state['port']}" if route == "proxy" else target["url"].rstrip("/")
+            response = await client.post(base + "/v1/chat/completions", json={
+                "messages": [{"role": "user", "content": TEST_PROMPT}],
+                "temperature": 0, "max_tokens": 2048, "stream": False})
+            response.raise_for_status()
+            await unchanged()
+            try:
+                body = response.json()
+                choice = body["choices"][0]
+                message = choice["message"]
+                texts = [message.get(key) for key in ("content", "reasoning_content", "reasoning")]
+                if not any(isinstance(text, str) and text.strip() for text in texts):
+                    raise ValueError("empty completion")
+                if any(text is not None and not isinstance(text, str) for text in texts):
+                    raise ValueError("invalid completion text")
+            except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
+                raise VerificationError("Test prompt returned invalid JSON or no generated text.") from exc
+        return {"route": route, "target": target["url"], "model": body.get("model") or target.get("model"),
+                "run_id": target.get("run_id"), "prompt": TEST_PROMPT, "message": message,
+                "elapsed_seconds": time.monotonic() - started, "finish_reason": choice.get("finish_reason"),
+                "usage": body.get("usage"),
+                "request_id": response.headers.get("x-llama-monitor-request-id") if route == "proxy" else None}

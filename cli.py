@@ -65,6 +65,8 @@ def parser():
     logs.add_argument("--tail", type=int, default=100)
     smoke = commands.add_parser("smoke", parents=[common])
     smoke.add_argument("--timeout", type=positive, default=60, help="Overall probe deadline, at most 300 seconds")
+    test_prompt = commands.add_parser("test-prompt", parents=[common], help="Send the fixed FizzBuzz request using the configured route")
+    test_prompt.add_argument("--timeout", type=positive, default=120, help="Overall deadline, at most 300 seconds")
     proxy = commands.add_parser("proxy", parents=[common]).add_subparsers(dest="action", required=True, parser_class=Parser)
     proxy.add_parser("status", parents=[common])
     settings = proxy.add_parser("settings", parents=[common])
@@ -242,10 +244,12 @@ def execute(args, client):
         return client.request("GET", "/api/history", params=params)
     if command in ("gaming", "startup"):
         return client.request("GET", f"/api/{command}/state")
-    if command == "smoke":
+    if command in ("smoke", "test-prompt"):
         if args.timeout > 300:
-            raise CLIError("Smoke timeout must be at most 300 seconds.", 2)
-        return client.request("POST", "/api/launcher/smoke", json={"timeout": args.timeout}, timeout=args.timeout + 2)
+            label = "Test prompt" if command == "test-prompt" else "Smoke"
+            raise CLIError(f"{label} timeout must be at most 300 seconds.", 2)
+        path = "/api/inference/test" if command == "test-prompt" else "/api/launcher/smoke"
+        return client.request("POST", path, json={"timeout": args.timeout}, timeout=args.timeout + 2)
     raise CLIError("Unknown command.", 2)
 
 

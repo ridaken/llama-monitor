@@ -337,6 +337,16 @@ Gaming, and startup settings:
   Flags start collapsed on each dashboard load.
 - **Console** — the **Console** button opens a live, auto-scrolling view of
   llama-server's console output (it tails the server's log file).
+- **Test prompt** — one click asks the current model for a Python FizzBuzz
+  program and opens a dialog with the reply, elapsed time, and route used.
+  It uses the inference proxy when enabled, otherwise connects directly. An
+  unavailable enabled proxy reports an error instead of being bypassed. Proxy
+  tests appear in **Requests** using the existing capture settings; direct
+  tests do not create proxy records. The test uses a 2,048-token output limit
+  and a 120-second deadline. Reasoning and incomplete output are identified in
+  the dialog. Generated code is displayed, never executed. This also works
+  with an explicitly configured external watch target. For the same request
+  from the bundled CLI, use `python cli.py test-prompt --json`.
 - **Port** — defaults to `8001`; change it if you like, but it can't be removed
   (the dashboard needs it to know where to monitor).
 - **Launch / Stop / Restart** — llama-monitor starts the server and immediately

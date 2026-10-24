@@ -206,3 +206,19 @@ export type HistoryPage = {
     prompts_configured?: boolean
   }
 }
+export type TestPromptResult = {
+  route: 'direct' | 'proxy'
+  model: string | null
+  target: string
+  run_id: string | null
+  prompt: string
+  elapsed_seconds: number
+  finish_reason: string | null
+  request_id: string | null
+  message: {
+    content?: string | null
+    reasoning_content?: string | null
+    reasoning?: string | null
+  }
+  usage: Record<string, unknown> | null
+}
