@@ -46,18 +46,18 @@ def main():
         Path(directory, "smoke.gguf").touch()
         env = {**os.environ, "MODELS_DIR": Path(directory).as_posix(),
                "BIND_ADDRESS": "127.0.0.1", "DASHBOARD_PORT": str(free_port()),
-               "INFERENCE_PORT": str(free_port()), "PROXY_PORT": str(free_port()), "PROXY_BIND_ADDRESS": "127.0.0.1"}
+               "INFERENCE_PORT": str(free_port()), "PROXY_PORT": str(free_port()), "PROXY_BIND_ADDRESS": ""}
         env.pop("LLAMA_CPP_IMAGE", None)
         compose = ["docker", "compose", "-p", f"llama-monitor-smoke-{os.getpid()}", "-f", "compose.yaml"]
         if args.gpu:
             compose += ["-f", "compose.override.yaml"]
 
-        def run(*command, capture=False):
-            return subprocess.run([*compose, *command], cwd=ROOT, env=env, check=True,
+        def run(*command, capture=False, environment=None):
+            return subprocess.run([*compose, *command], cwd=ROOT, env=environment or env, check=True,
                                   text=True, stdout=subprocess.PIPE if capture else None).stdout
 
-        def request(path, body=None, inference=False):
-            port = env["INFERENCE_PORT" if inference else "DASHBOARD_PORT"]
+        def request(path, body=None, inference=False, proxy=False):
+            port = env["PROXY_PORT" if proxy else "INFERENCE_PORT" if inference else "DASHBOARD_PORT"]
             req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
                 data=json.dumps(body).encode() if body is not None else None,
                 headers={"Content-Type": "application/json"})
@@ -77,6 +77,24 @@ def main():
             return body.get("data") if expected == 0 else body["error"]
 
         try:
+            # Resolve the real Compose interpolation without starting services.
+            # Explicit empty values also isolate these checks from the host .env.
+            for bind, proxy_bind, expected in [
+                ("", "", "0.0.0.0"),
+                ("127.0.0.1", "", "127.0.0.1"),
+                ("192.0.2.10", "", "192.0.2.10"),
+                ("0.0.0.0", "127.0.0.1", "127.0.0.1"),
+                ("127.0.0.1", "192.0.2.20", "192.0.2.20"),
+            ]:
+                config = json.loads(run("config", "--format", "json", capture=True,
+                    environment={**env, "BIND_ADDRESS": bind, "PROXY_BIND_ADDRESS": proxy_bind}))
+                ports = {port["target"]: port["host_ip"] for port in config["services"]["monitor"]["ports"]}
+                assert ports == {8500: bind or "0.0.0.0", 8001: bind or "0.0.0.0", 8501: expected}, ports
+            example_env = {key: value for key, value in env.items()
+                           if key not in {"BIND_ADDRESS", "PROXY_BIND_ADDRESS"}}
+            config = json.loads(run("--env-file", ".env.example", "config", "--format", "json",
+                                    capture=True, environment=example_env))
+            assert all(port["host_ip"] == "0.0.0.0" for port in config["services"]["monitor"]["ports"])
             run("config", "--quiet")
             run("up", "--build", "--wait", "--wait-timeout", "120", "-d")
             assert request("/api/health") == {"status": "ok"}
@@ -121,6 +139,7 @@ def main():
             assert direct["request_id"] is None and cli("requests", "list")["items"] == []
             cli("proxy", "smoke", expected=1)
             assert cli("proxy", "settings", "--enabled", "on")["listening"]
+            assert request("/health", proxy=True)["status"] == "ok"
             probe = cli("test-prompt", "--timeout", "10")
             assert probe["route"] == "proxy"
             eventually(lambda: cli("requests", "show", probe["request_id"])["state"] == "complete")
