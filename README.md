@@ -115,16 +115,18 @@ models or adapters. Windows `.exe` files and arbitrary host paths cannot be used
 inside this Linux container.
 
 The dashboard is also available at `http://<host-LAN-IP>:8500`, and the managed
-server's OpenAI-compatible API at `http://<host-LAN-IP>:8001/v1`. Both ports are
-published on all host interfaces by default. **Use a trusted LAN:** the dashboard
-has no built-in authentication, and connected users can browse container files
-and control the managed server. Do not expose these ports directly to the internet.
+server's OpenAI-compatible API at `http://<host-LAN-IP>:8001/v1`. After enabling
+**Manage → Inference proxy**, clients can use `http://<host-LAN-IP>:8501/v1`.
+All three ports use `BIND_ADDRESS` and are published on all host interfaces by
+default; `PROXY_BIND_ADDRESS` can override just the proxy. **Use a trusted LAN:**
+the dashboard has no built-in authentication, and connected users can browse
+container files and control the managed server. Do not expose these ports directly to the internet.
 Set `BIND_ADDRESS=127.0.0.1` in `.env` to restrict access to this computer.
 
-`DASHBOARD_PORT` and `INFERENCE_PORT` in `.env` change the **host** ports, including
-when another native installation already uses 8500 or 8001. The internal ports
-remain 8500 and 8001; the launcher fixes its port to 8001 so publishing keeps
-working. Apply port or mount changes with `docker compose up -d`.
+`DASHBOARD_PORT`, `INFERENCE_PORT`, and `PROXY_PORT` in `.env` change the **host**
+ports, including when another native installation already uses one. The internal
+ports remain 8500, 8001, and 8501; the launcher fixes its port to 8001 so publishing
+keeps working. Apply port or mount changes with `docker compose up -d`.
 
 ### CPU-only installation
 
@@ -662,8 +664,12 @@ python cli.py requests clear --yes --json
 ```
 
 In Docker, prefix these commands with `docker compose exec -T monitor`.
-Compose publishes `PROXY_PORT=8501` on `PROXY_BIND_ADDRESS=127.0.0.1` by default;
-use `0.0.0.0` for LAN clients and recreate the service after changing publication.
+Compose publishes `PROXY_PORT=8501` on `BIND_ADDRESS` (default `0.0.0.0`) unless
+`PROXY_BIND_ADDRESS` is set to a nonempty override. New installs therefore allow
+LAN clients once the proxy is enabled. Set `BIND_ADDRESS=127.0.0.1` to keep all
+three ports local, or `PROXY_BIND_ADDRESS=127.0.0.1` to restrict only the proxy.
+Existing explicit overrides are preserved. Apply publication changes with
+`docker compose up -d`; this may restart the container and stop its model.
 Native `--proxy-host` defaults to the dashboard bind address and `--proxy-port`
 defaults to 8501 (`MONITOR_PROXY_HOST` / `MONITOR_PROXY_PORT` environment overrides).
 Choose different dashboard, inference, and proxy ports. The proxy forwards client
