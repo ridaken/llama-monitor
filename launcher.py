@@ -24,7 +24,7 @@ from typing import Callable, Optional
 import store
 import runtime
 import flags as flags_mod
-from processes import capture_process, identity_matches, same_path, terminate_verified
+from processes import capture_process, identity_matches, same_identity, same_path, terminate_verified
 
 try:
     import psutil  # used to re-adopt / stop a server across dashboard restarts
@@ -193,7 +193,7 @@ class ServerManager:
         try:
             actual = capture_process(pid)
             if rec.get("identity"):
-                valid = identity_matches(rec["identity"])
+                valid = identity_matches(rec["identity"]) and same_identity(rec["identity"], actual)
             else:
                 config = rec.get("config") or {}
                 valid = (same_path(actual["executable"], resolve_binary(store.get_settings().get("llama_server_path")))

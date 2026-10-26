@@ -84,6 +84,49 @@ def test_identity_change_during_health_fails(probe):
     assert probe.readiness()["state"] == "failed"
 
 
+@pytest.mark.parametrize("offset", [-1, 1])
+def test_linux_clock_shift_during_readiness_and_inference_is_allowed(probe, monkeypatch, offset):
+    original = probe.manager.snapshot
+    calls = []
+
+    def snapshot():
+        calls.append(1)
+        return {**original(), "boot_id": "test-boot", "start_ticks": 3709,
+                "created_at": 1000 + offset * len(calls)}
+
+    probe.manager.snapshot = snapshot
+    assert probe.readiness()["ready"]
+    inference(monkeypatch, lambda _: httpx.Response(200, json={
+        "choices": [{"message": {"content": "OK"}}]}))
+    assert asyncio.run(probe.smoke(2))["message"]["content"] == "OK"
+
+
+@pytest.mark.parametrize("change", [{"boot_id": "other-boot"}, {"start_ticks": 3710},
+                                    {"pid": 124}, {"executable": "other-server"}])
+def test_linux_identity_change_during_health_fails(probe, change):
+    original = probe.manager.snapshot
+    calls = []
+
+    def snapshot():
+        current = {**original(), "boot_id": "test-boot", "start_ticks": 3709}
+        if calls:
+            current.update(change)
+        calls.append(1)
+        return current
+
+    probe.manager.snapshot = snapshot
+    assert probe.readiness()["state"] == "failed"
+
+
+def test_same_linux_process_with_changed_run_id_fails_verification(probe):
+    original = probe.manager.snapshot
+    probe.manager.snapshot = lambda: {**original(), "boot_id": "test-boot", "start_ticks": 3709}
+    snapshot = probe._snapshot()
+    store.set_running({"pid": 123, "run_id": "different-run"})
+    with pytest.raises(v.VerificationError, match="changed during verification"):
+        probe._unchanged(snapshot)
+
+
 def test_process_access_error_is_reported_as_verification_failure(probe):
     def denied():
         raise psutil.AccessDenied(123)

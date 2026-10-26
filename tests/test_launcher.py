@@ -222,7 +222,7 @@ def fake_popen(monkeypatch):
             current = capture(record["pid"])
         except launcher.psutil.NoSuchProcess:
             return False
-        return all(record[key] == current[key] for key in ("pid", "created_at", "executable"))
+        return launcher.same_identity(record, current)
 
     monkeypatch.setattr(launcher.subprocess, "Popen", _popen)
     # Help parsing has its own tests; subprocess.run would also use fake Popen
@@ -282,6 +282,22 @@ def test_changed_process_identity_preserves_ownership(good_settings, fake_popen)
     assert fake_popen["proc"].poll() is None
     assert mgr.status()["state"] == "running"
     assert store.get_running() == original
+
+
+@pytest.mark.parametrize("operation", ["stop", "restart"])
+@pytest.mark.parametrize("offset", [-1, 1])
+def test_linux_clock_shift_allows_lifecycle(good_settings, fake_popen, operation, offset):
+    mgr = ServerManager(lambda *a: None)
+    mgr.launch({"name": "c1", "model_path": _gguf(good_settings), "port": 9001})
+    stable = {"boot_id": "test-boot", "start_ticks": 3709}
+    fake_popen["identity"].update(stable)
+    mgr._identity.update(stable)
+    fake_popen["identity"]["created_at"] += offset
+    previous = fake_popen["proc"]
+    result = getattr(mgr, operation)()
+    assert previous.poll() is not None
+    assert result["state"] == ("stopped" if operation == "stop" else "running")
+    mgr.stop()
 
 
 def test_crash_reports_exited_with_code(good_settings, fake_popen):
@@ -395,6 +411,36 @@ def test_adopt_reattaches_to_a_live_server(good_settings, monkeypatch):
     assert st["adopted"] is True
     assert st["pid"] == 4321
     assert st["config_name"] == "c1"
+
+
+@pytest.mark.parametrize("stable,offset,accepted", [(True, -1, True), (True, 1, True),
+                                                  (False, 0, True), (False, -1, False)])
+def test_adoption_uses_stable_identity_and_upgrades_verified_legacy(
+        good_settings, monkeypatch, stable, offset, accepted):
+    identity = {"pid": 4321, "created_at": 1000.09, "executable": sys.executable,
+                "argv": [sys.executable], "cwd": str(good_settings)}
+    token = {"boot_id": "test-boot", "start_ticks": 3709}
+    recorded = {**identity, **(token if stable else {})}
+    actual = {**identity, **token, "created_at": identity["created_at"] + offset}
+    monkeypatch.setattr(launcher, "_process_alive", lambda pid: True)
+    monkeypatch.setattr(launcher, "capture_process", lambda pid: dict(actual))
+    monkeypatch.setattr(launcher, "identity_matches", lambda rec: launcher.same_identity(rec, actual))
+    store.set_running({"pid": 4321, "port": 9001, "config": {"name": "c1", "port": 9001},
+                       "identity": recorded})
+    mgr = ServerManager(lambda *a: None)
+    result = mgr.adopt()
+    if accepted:
+        assert result["identity"] == actual
+        assert store.get_running()["identity"]["start_ticks"] == 3709
+        assert mgr.status()["adopted"]
+        assert mgr.snapshot()["boot_id"] == "test-boot"
+        stopped = []
+        monkeypatch.setattr(launcher, "terminate_verified", lambda rec, grace: stopped.append(rec))
+        assert mgr.stop()["state"] == "stopped"
+        assert stopped == [actual]
+    else:
+        assert result is None and store.get_running() is None
+        assert mgr.status()["state"] == "stopped"
 
 
 def test_adopt_clears_stale_record_when_process_gone(good_settings, monkeypatch):
