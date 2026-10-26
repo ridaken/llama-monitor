@@ -43,9 +43,12 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { fmt } from '@/lib/utils'
-import type { Activity, HistoryPage } from '@/types'
+import type { ActivityRecord, ActivityPage, RequestRecord } from '@/types'
+import { ProxyDetails, MonitoredDetails } from '@/components/ActivityDetails'
 
 type Filters = {
+  source: string
+  endpoint: string
   model: string
   state: string
   from: string
@@ -54,6 +57,8 @@ type Filters = {
   order: string
 }
 const initialFilters: Filters = {
+  source: 'all',
+  endpoint: '',
   model: '',
   state: '',
   from: '',
@@ -68,29 +73,48 @@ const stateLabels: Record<string, string> = {
   prompt_only: 'Prompt only',
   running: 'Running',
   error: 'Error',
+  cancelled: 'Cancelled',
+  interrupted: 'Interrupted',
 }
 
 export function History({ active }: { active: boolean }) {
   const recordsRef = useRef<HTMLDivElement>(null)
   const paginationRef = useRef<HTMLDivElement>(null)
-  const [filters, setFilters] = useState<Filters>(initialFilters)
+  const readSource = () => {
+    if (location.hash === '#requests') return 'proxy'
+    const source = new URLSearchParams(location.hash.split('?')[1]).get(
+      'source',
+    )
+    return source === 'proxy' || source === 'monitored' ? source : 'all'
+  }
+  const [filters, setFilters] = useState<Filters>(() => ({
+    ...initialFilters,
+    source: readSource(),
+  }))
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([null])
   const [pageIndex, setPageIndex] = useState(0)
-  const [result, setResult] = useState<HistoryPage | null>(null)
+  const [result, setResult] = useState<ActivityPage | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [selected, setSelected] = useState<ActivityRecord | null>(null)
+  const [detail, setDetail] = useState<RequestRecord | null>(null)
   const [prompt, setPrompt] = useState<{
-    item: Activity
     text: string
     truncated: boolean
   } | null>(null)
-  const [clearOpen, setClearOpen] = useState(false)
+  const [detailError, setDetailError] = useState('')
+  const [clearSource, setClearSource] = useState<'proxy' | 'monitored' | null>(
+    null,
+  )
+  const [clearing, setClearing] = useState(false)
   const [revision, setRevision] = useState(0)
   const params = useMemo(() => {
     const query = new URLSearchParams({
+      source: filters.source,
       sort: filters.sort,
       order: filters.order,
     })
+    if (filters.endpoint) query.set('endpoint', filters.endpoint)
     if (filters.model) query.set('model', filters.model)
     if (filters.state) query.set('state', filters.state)
     if (filters.from)
@@ -110,7 +134,7 @@ export function History({ active }: { active: boolean }) {
     if (!active) return
     const controller = new AbortController()
     setLoading(true)
-    api<HistoryPage>(`/api/history?${params}`, { signal: controller.signal })
+    api<ActivityPage>(`/api/activity?${params}`, { signal: controller.signal })
       .then((data) => {
         setResult(data)
         setError('')
@@ -157,38 +181,80 @@ export function History({ active }: { active: boolean }) {
       window.removeEventListener('resize', measure)
     }
   }, [active, result, error, loading])
-  const change = (key: keyof Filters, value: string) => {
-    setFilters((old) => ({ ...old, [key]: value }))
+  const resetPage = () => {
     setCursorStack([null])
     setPageIndex(0)
-    setPrompt(null)
+    setSelected(null)
+    setResult(null)
   }
-  const viewPrompt = async (item: Activity) => {
-    setPrompt({ item, text: 'Loading prompt…', truncated: false })
-    try {
-      const data = await api<{ prompt_text: string; truncated?: boolean }>(
-        `/api/history/${encodeURIComponent(item.id)}/prompt`,
-      )
-      setPrompt({ item, text: data.prompt_text, truncated: !!data.truncated })
-    } catch (err) {
-      setPrompt({
-        item,
-        text: `Could not load prompt: ${(err as Error).message}`,
-        truncated: false,
-      })
+  const change = (key: keyof Filters, value: string) => {
+    setFilters((old) => ({
+      ...old,
+      [key]: value,
+      ...(key === 'source' && value === 'monitored' ? { endpoint: '' } : {}),
+    }))
+    resetPage()
+    if (key === 'source') location.hash = `history?source=${value}`
+  }
+  useEffect(() => {
+    const onHash = () => {
+      if (!['#history', '#requests'].includes(location.hash.split('?')[0]))
+        return
+      const source = readSource()
+      setFilters((old) => ({
+        ...old,
+        source,
+        ...(source === 'monitored' ? { endpoint: '' } : {}),
+      }))
+      resetPage()
     }
-  }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+  useEffect(() => {
+    setDetail(null)
+    setPrompt(null)
+    setDetailError('')
+    if (!selected) return
+    const controller = new AbortController()
+    const options = { signal: controller.signal }
+    if (selected.source === 'proxy') {
+      api<RequestRecord>(
+        `/api/requests/${encodeURIComponent(selected.record_id)}`,
+        options,
+      )
+        .then(setDetail)
+        .catch((err) => {
+          if (err.name !== 'AbortError') setDetailError(err.message)
+        })
+    } else if (selected.has_prompt) {
+      api<{ prompt_text: string; truncated?: boolean }>(
+        `/api/history/${encodeURIComponent(selected.record_id)}/prompt`,
+        options,
+      )
+        .then((data) =>
+          setPrompt({ text: data.prompt_text, truncated: !!data.truncated }),
+        )
+        .catch((err) => {
+          if (err.name !== 'AbortError') setDetailError(err.message)
+        })
+    }
+    return () => controller.abort()
+  }, [selected])
   const clear = async () => {
+    if (!clearSource || clearing) return
+    setClearing(true)
     try {
-      await api('/api/history', { method: 'DELETE' })
-      setClearOpen(false)
-      setPrompt(null)
-      setCursorStack([null])
-      setPageIndex(0)
+      await api(clearSource === 'proxy' ? '/api/requests' : '/api/history', {
+        method: 'DELETE',
+      })
+      setClearSource(null)
+      resetPage()
       setRevision((n) => n + 1)
     } catch (err) {
       setError(`Could not clear history: ${(err as Error).message}`)
-      setClearOpen(false)
+    } finally {
+      setClearing(false)
     }
   }
   const coverage = result?.log_status
@@ -211,21 +277,37 @@ export function History({ active }: { active: boolean }) {
             <div>
               <CardTitle className="flex items-center gap-2 text-xl">
                 <CalendarRange className="size-5 text-primary" />
-                Activity history
+                History
               </CardTitle>
               <CardDescription className="mt-2">
-                Log-derived generations and saved native prompts. Proxy request
-                and response content is available in Requests.
+                Proxied requests, log-derived generations and saved prompts. The
+                same inference can appear under both sources.
               </CardDescription>
             </div>
-            <Button
-              id="history-clear"
-              variant="outline"
-              onClick={() => setClearOpen(true)}
-            >
-              <Trash2 />
-              Clear history
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                disabled={loading}
+                onClick={() => {
+                  resetPage()
+                  setRevision((n) => n + 1)
+                }}
+              >
+                Refresh
+              </Button>
+              <Button
+                id="history-clear"
+                variant="outline"
+                onClick={() => setClearSource('monitored')}
+              >
+                <Trash2 />
+                Clear monitored history
+              </Button>
+              <Button variant="outline" onClick={() => setClearSource('proxy')}>
+                <Trash2 />
+                Clear proxy history
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -236,6 +318,14 @@ export function History({ active }: { active: boolean }) {
           >
             {error || coverageText}
           </p>
+          {result?.capture_error && (
+            <p role="alert" className="mt-2 text-sm text-amber-300">
+              Proxy capture: {result.capture_error}
+            </p>
+          )}
+          {error && (
+            <p className="mt-2 text-sm text-muted-foreground">{coverageText}</p>
+          )}
         </CardContent>
       </Card>
       <Card className="surface history-explore rounded-2xl">
@@ -246,7 +336,38 @@ export function History({ active }: { active: boolean }) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="history-filters mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="history-filters mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+            <div className="space-y-2">
+              <Label htmlFor="history-source">Source</Label>
+              <Select
+                value={filters.source}
+                onValueChange={(value) => change('source', value)}
+              >
+                <SelectTrigger id="history-source">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="proxy">Proxied</SelectItem>
+                  <SelectItem value="monitored">Monitored</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="history-endpoint">Endpoint</Label>
+              <Input
+                id="history-endpoint"
+                placeholder="All endpoints"
+                value={filters.endpoint}
+                disabled={filters.source === 'monitored'}
+                onChange={(event) => change('endpoint', event.target.value)}
+              />
+              {filters.endpoint && (
+                <p className="text-xs text-muted-foreground">
+                  Endpoint filters show proxied records only.
+                </p>
+              )}
+            </div>
             <div className="space-y-2">
               <Label htmlFor="history-model">Model</Label>
               <Select
@@ -377,15 +498,23 @@ export function History({ active }: { active: boolean }) {
                         >
                           {stateLabels[item.state] || item.state}
                         </Badge>
+                        <Badge variant="outline">
+                          {item.source === 'proxy' ? 'Proxied' : 'Monitored'}
+                        </Badge>
                       </div>
+                      {item.source === 'proxy' && (
+                        <p className="mb-2 break-all text-xs">
+                          {item.endpoint} · HTTP {item.status_code ?? '—'}
+                        </p>
+                      )}
                       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                         <div>
                           <dt className="text-muted-foreground">
                             Run / slot / task
                           </dt>
                           <dd className="mono mt-1">
-                            {item.run_id.slice(0, 8)} / {item.slot_id ?? '?'} /{' '}
-                            {item.task_id ?? '?'}
+                            {(item.run_id || '—').slice(0, 8)} /{' '}
+                            {item.slot_id ?? '?'} / {item.task_id ?? '?'}
                           </dd>
                         </div>
                         <div>
@@ -415,7 +544,11 @@ export function History({ active }: { active: boolean }) {
                           </dd>
                         </div>
                         <div>
-                          <dt className="text-muted-foreground">Total</dt>
+                          <dt className="text-muted-foreground">
+                            {item.source === 'proxy'
+                              ? 'Request duration'
+                              : 'Generation duration'}
+                          </dt>
                           <dd className="mt-1">
                             {item.total_seconds == null
                               ? '—'
@@ -433,22 +566,24 @@ export function History({ active }: { active: boolean }) {
                           </dd>
                         </div>
                       </dl>
-                      {item.has_prompt && (
+                      {
                         <Button
                           variant="outline"
                           size="sm"
                           className="mt-4"
-                          onClick={() => viewPrompt(item)}
+                          onClick={() => setSelected(item)}
                         >
                           <Eye />
-                          View prompt
+                          {item.source === 'monitored' && item.has_prompt
+                            ? 'View prompt'
+                            : 'View details'}
                         </Button>
-                      )}
+                      }
                     </article>
                   ))}
                   {!rows.length && (
                     <p className="rounded-xl border border-border p-8 text-center text-sm text-muted-foreground">
-                      No observed generations match these filters.
+                      No history records match these filters.
                     </p>
                   )}
                 </div>
@@ -457,15 +592,18 @@ export function History({ active }: { active: boolean }) {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Observed</TableHead>
-                        <TableHead>Model</TableHead>
+                        <TableHead>Model / endpoint</TableHead>
+                        <TableHead>Source</TableHead>
                         <TableHead>State</TableHead>
                         <TableHead>Run / slot / task</TableHead>
-                        <TableHead>Prompt</TableHead>
+                        <TableHead>Details</TableHead>
                         <TableHead>Prompt tokens</TableHead>
                         <TableHead>Generated</TableHead>
                         <TableHead>Prefill</TableHead>
                         <TableHead>Decode</TableHead>
-                        <TableHead>Total</TableHead>
+                        <TableHead title="Proxy elapsed request time or monitored generation time">
+                          Duration
+                        </TableHead>
                         <TableHead>Draft</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -480,6 +618,21 @@ export function History({ active }: { active: boolean }) {
                             title={item.model || ''}
                           >
                             {item.model || '—'}
+                            {item.source === 'proxy' && (
+                              <div
+                                className="text-xs text-muted-foreground"
+                                title={item.endpoint}
+                              >
+                                {item.endpoint} · HTTP {item.status_code ?? '—'}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">
+                              {item.source === 'proxy'
+                                ? 'Proxied'
+                                : 'Monitored'}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <Badge
@@ -493,22 +646,20 @@ export function History({ active }: { active: boolean }) {
                             </Badge>
                           </TableCell>
                           <TableCell className="mono text-xs">
-                            {item.run_id.slice(0, 8)} / {item.slot_id ?? '?'} /{' '}
-                            {item.task_id ?? '?'}
+                            {(item.run_id || '—').slice(0, 8)} /{' '}
+                            {item.slot_id ?? '?'} / {item.task_id ?? '?'}
                           </TableCell>
                           <TableCell>
-                            {item.has_prompt ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => viewPrompt(item)}
-                              >
-                                <Eye />
-                                View prompt
-                              </Button>
-                            ) : (
-                              '—'
-                            )}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setSelected(item)}
+                            >
+                              <Eye />
+                              {item.source === 'monitored' && item.has_prompt
+                                ? 'View prompt'
+                                : 'View details'}
+                            </Button>
                           </TableCell>
                           <TableCell>{fmt(item.prompt_tokens)}</TableCell>
                           <TableCell>{fmt(item.generated_tokens)}</TableCell>
@@ -522,7 +673,13 @@ export function History({ active }: { active: boolean }) {
                               ? '—'
                               : `${fmt(item.decode_seconds, 2)}s`}
                           </TableCell>
-                          <TableCell>
+                          <TableCell
+                            title={
+                              item.source === 'proxy'
+                                ? 'Elapsed proxy request time'
+                                : 'Server generation time'
+                            }
+                          >
                             {item.total_seconds == null
                               ? '—'
                               : `${fmt(item.total_seconds, 2)}s`}
@@ -537,10 +694,10 @@ export function History({ active }: { active: boolean }) {
                       {!rows.length && (
                         <TableRow>
                           <TableCell
-                            colSpan={11}
+                            colSpan={12}
                             className="py-12 text-center text-muted-foreground"
                           >
-                            No observed generations match these filters.
+                            No history records match these filters.
                           </TableCell>
                         </TableRow>
                       )}
@@ -564,7 +721,7 @@ export function History({ active }: { active: boolean }) {
                     id="history-prev"
                     variant="outline"
                     size="sm"
-                    disabled={pageIndex === 0}
+                    disabled={pageIndex === 0 || loading}
                     onClick={() => setPageIndex((n) => n - 1)}
                   >
                     <ChevronLeft />
@@ -577,7 +734,7 @@ export function History({ active }: { active: boolean }) {
                     id="history-next"
                     variant="outline"
                     size="sm"
-                    disabled={!result?.next_cursor}
+                    disabled={!result?.next_cursor || loading}
                     onClick={() => {
                       if (result?.next_cursor) {
                         setCursorStack((old) => {
@@ -598,41 +755,113 @@ export function History({ active }: { active: boolean }) {
           )}
         </CardContent>
       </Card>
-      <Dialog open={!!prompt} onOpenChange={(open) => !open && setPrompt(null)}>
-        <DialogContent className="max-w-3xl">
+      <Dialog
+        open={!!selected}
+        onOpenChange={(open) => !open && setSelected(null)}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Saved prompt</DialogTitle>
-            <DialogDescription>
-              {prompt?.item.state === 'prompt_only'
-                ? 'No reliable timing match for this prompt. '
-                : ''}
-              {prompt?.truncated ? 'First 1 MiB saved; prompt was longer.' : ''}
+            <DialogTitle>
+              {selected?.source === 'proxy'
+                ? 'Request details'
+                : 'Monitored generation details'}
+            </DialogTitle>
+            <DialogDescription className="break-all">
+              {selected?.source === 'proxy' ? 'Proxied' : 'Monitored'} ·{' '}
+              {selected?.record_id}
             </DialogDescription>
           </DialogHeader>
-          <pre
-            id="history-prompt-text"
-            className="mono max-h-[60vh] overflow-auto rounded-lg border border-border bg-background p-4 text-xs whitespace-pre-wrap break-words"
-          >
-            {prompt?.text}
-          </pre>
+          {detailError && (
+            <p role="alert" className="text-sm text-amber-300">
+              {detailError}
+            </p>
+          )}
+          {selected?.source === 'proxy' ? (
+            detail ? (
+              <>
+                <p className="break-all text-sm">
+                  {detail.state} · HTTP {detail.status_code ?? '—'} ·{' '}
+                  {detail.target}
+                </p>
+                <p className="text-sm">
+                  Request duration:{' '}
+                  {detail.duration_seconds == null
+                    ? '—'
+                    : `${fmt(detail.duration_seconds, 3)}s`}{' '}
+                  · First content:{' '}
+                  {detail.first_token_seconds == null
+                    ? '—'
+                    : `${fmt(detail.first_token_seconds, 3)}s`}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  For non-streaming requests, first content is observed when the
+                  complete response arrives.
+                </p>
+                <ProxyDetails selected={detail} setError={setDetailError} />
+              </>
+            ) : (
+              !detailError && <p role="status">Loading request…</p>
+            )
+          ) : (
+            selected && (
+              <>
+                <MonitoredDetails item={selected} />
+                {selected.has_prompt ? (
+                  prompt ? (
+                    <>
+                      {prompt.truncated && (
+                        <p className="text-sm text-amber-300">
+                          First 1 MiB saved; prompt was longer.
+                        </p>
+                      )}
+                      <pre
+                        id="history-prompt-text"
+                        className="mono max-h-[60vh] overflow-auto rounded-lg border border-border bg-background p-4 text-xs whitespace-pre-wrap break-words"
+                      >
+                        {prompt.text}
+                      </pre>
+                    </>
+                  ) : (
+                    !detailError && <p role="status">Loading prompt…</p>
+                  )
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No saved native prompt. Responses are available only for
+                    captured proxy requests.
+                  </p>
+                )}
+              </>
+            )
+          )}
         </DialogContent>
       </Dialog>
-      <Dialog open={clearOpen} onOpenChange={setClearOpen}>
+      <Dialog
+        open={!!clearSource}
+        onOpenChange={(open) => !open && !clearing && setClearSource(null)}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Clear activity history?</DialogTitle>
+            <DialogTitle>
+              Clear {clearSource === 'proxy' ? 'proxy' : 'monitored'} history?
+            </DialogTitle>
             <DialogDescription>
-              Delete saved generations and prompt text? This cannot be undone.
-              Managed prompt files will also be removed; external server files
-              remain.
+              {clearSource === 'proxy'
+                ? 'Delete all captured proxy requests, prompts and responses? Monitored history is kept.'
+                : 'Delete all monitored generations and saved native prompts? Managed prompt files will also be removed; external files and proxy history are kept.'}{' '}
+              This affects all records in this source, regardless of the current
+              filters, and cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setClearOpen(false)}>
+            <Button
+              variant="outline"
+              disabled={clearing}
+              onClick={() => setClearSource(null)}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={clear}>
-              Clear history
+            <Button variant="destructive" disabled={clearing} onClick={clear}>
+              Clear {clearSource === 'proxy' ? 'proxy' : 'monitored'} history
             </Button>
           </div>
         </DialogContent>

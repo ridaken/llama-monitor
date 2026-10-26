@@ -160,9 +160,17 @@ def main():
             eventually(lambda: cli("requests", "show", probe["request_id"])["state"] == "complete")
             assert cli("requests", "show", probe["request_id"])["response_text"] is None
             assert cli("requests", "list")["items"]
+            eventually(lambda: cli("activity", "list", "--source", "monitored")["items"])
+            activity = cli("activity", "list", "--limit", "200")
+            assert {row["source"] for row in activity["items"]} == {"proxy", "monitored"}
+            proxied = cli("activity", "list", "--source", "proxy", "--endpoint", "/v1/chat/completions")
+            assert proxied["items"] and all(row["source"] == "proxy" for row in proxied["items"])
+            assert all("request_text" not in row and "response_text" not in row for row in activity["items"])
+            cli("activity", "list", "--cursor", "invalid", expected=1)
             cli("requests", "clear", expected=2)
             cli("requests", "clear", "--yes")
             assert cli("requests", "list")["items"] == []
+            assert cli("activity", "list", "--source", "monitored")["items"]
             assert cli("proxy", "settings", "--enabled", "off")["listening"] is False
             assert request("/health", inference=True)["status"] == "ok"
             assert cli("stats")["runtime"]["containerized"]

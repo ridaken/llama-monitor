@@ -246,11 +246,12 @@ for (const mode of ['Fit', 'Comfortable']) {
     }) => {
       await page.setViewportSize({ width, height: 900 })
       await mockApi(page, {
-        'GET /api/history': () => ({
+        'GET /api/activity': () => ({
           ...historyPage,
           items: Array.from({ length: 50 }, (_, i) => ({
             ...historyPage.items[0],
-            id: `h${i + 1}`,
+            id: `monitored:h${i + 1}`,
+            record_id: `h${i + 1}`,
             model: `Record ${i + 1}`,
           })),
           next_cursor: 'next-page',

@@ -103,7 +103,8 @@ export function TestPrompt({ disabled }: { disabled: boolean }) {
               )}
               {result.request_id && (
                 <p className="break-all text-xs text-muted-foreground">
-                  Request ID: {result.request_id} · View in Requests
+                  Request ID: {result.request_id} · View in History under
+                  Proxied
                 </p>
               )}
             </>

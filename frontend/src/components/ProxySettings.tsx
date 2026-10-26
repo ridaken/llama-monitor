@@ -118,10 +118,10 @@ export function ProxySettings() {
         </p>
         <p className="text-sm text-muted-foreground">
           Point clients at this proxy to capture chat and completion requests in
-          Requests. Direct llama-server connections continue to work. Capture
-          changes apply to new requests. Records remain until cleared; each
-          saved payload is limited to 1 MiB. Image and binary content is
-          omitted.
+          History under Proxied. Direct llama-server connections continue to
+          work. Capture changes apply to new requests. Records remain until
+          cleared; each saved payload is limited to 1 MiB. Image and binary
+          content is omitted.
         </p>
         <p className="text-xs text-muted-foreground">
           Docker: use the published PROXY_PORT if it differs from this address.

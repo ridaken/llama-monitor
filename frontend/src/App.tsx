@@ -9,7 +9,6 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { History } from '@/components/History'
-import { Requests } from '@/components/Requests'
 import { LauncherDialogs } from '@/components/Launcher'
 import { useLauncher } from '@/hooks/useLauncher'
 import { Manage } from '@/components/Manage'
@@ -17,7 +16,7 @@ import { Monitor } from '@/components/Monitor'
 import { useMonitor } from '@/hooks/useMonitor'
 import { gamingLabel } from '@/lib/gaming'
 
-type View = 'monitor' | 'manage' | 'history' | 'requests'
+type View = 'monitor' | 'manage' | 'history'
 type AppLayout = 'fit' | 'comfortable'
 const appLayoutKey = 'llama-monitor:monitor-layout'
 const readAppLayout = (): AppLayout => {
@@ -30,14 +29,19 @@ const readAppLayout = (): AppLayout => {
   }
 }
 const readView = (): View => {
-  const hash = location.hash.slice(1)
-  return hash === 'manage' || hash === 'history' || hash === 'requests'
-    ? hash
-    : 'monitor'
+  let hash = location.hash.slice(1).split('?')[0]
+  if (hash === 'requests') {
+    history.replaceState(null, '', '#history?source=proxy')
+    hash = 'history'
+  }
+  return hash === 'manage' || hash === 'history' ? hash : 'monitor'
 }
 
 export default function App() {
   const [view, setView] = useState<View>(readView)
+  const [historyHref, setHistoryHref] = useState(() =>
+    location.hash.startsWith('#history') ? location.hash : '#history',
+  )
   const [appLayout, setAppLayout] = useState<AppLayout>(readAppLayout)
   const monitor = useMonitor()
   const launcher = useLauncher()
@@ -49,7 +53,11 @@ export default function App() {
     }
   }, [appLayout])
   useEffect(() => {
-    const onHash = () => setView(readView())
+    const onHash = () => {
+      const next = readView()
+      setView(next)
+      if (next === 'history') setHistoryHref(location.hash)
+    }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -90,12 +98,6 @@ export default function App() {
       label: 'History',
       icon: HistoryIcon,
       description: 'Past activity',
-    },
-    {
-      key: 'requests',
-      label: 'Requests',
-      icon: Activity,
-      description: 'Proxy prompts and responses',
     },
   ]
   return (
@@ -174,7 +176,7 @@ export default function App() {
               }
             >
               <a
-                href={`#${key}`}
+                href={key === 'history' ? historyHref : `#${key}`}
                 aria-current={view === key ? 'page' : undefined}
                 title={description}
               >
@@ -213,9 +215,7 @@ export default function App() {
               ? 'Live monitor'
               : view === 'manage'
                 ? 'Server management'
-                : view === 'requests'
-                  ? 'Proxy requests'
-                  : 'Activity history'}
+                : 'Activity history'}
           </h1>
           <div className="monitor-view" hidden={view !== 'monitor'}>
             <Monitor monitor={monitor} launcher={launcher} />
@@ -225,9 +225,6 @@ export default function App() {
           </div>
           <div hidden={view !== 'history'}>
             <History active={view === 'history'} />
-          </div>
-          <div hidden={view !== 'requests'}>
-            <Requests active={view === 'requests'} />
           </div>
         </main>
         <LauncherDialogs launcher={launcher} />

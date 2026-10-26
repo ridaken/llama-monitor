@@ -253,7 +253,7 @@ test('history filters, prompt viewing and confirmed clearing work', async ({
   await page.locator('#history-clear').click()
   await page
     .getByRole('dialog')
-    .getByRole('button', { name: 'Clear history' })
+    .getByRole('button', { name: 'Clear monitored history' })
     .click()
   await expect.poll(() => calls.includes('DELETE /api/history')).toBe(true)
 })

@@ -41,6 +41,7 @@ from collectors import (
     find_llama_pids,
 )
 from history import HistoryDB, LogFollower, decode_log_line
+from activity import ActivityHistory
 from launcher import LaunchError, ServerManager, configured_model_name, resolve_binary, startup_log_path
 from placement import placement_response
 from diagnostics import doctor
@@ -572,6 +573,25 @@ def build_app(args) -> FastAPI:
             data["layer_placement"] = {"status": "no_model", "reason": "No model loaded", "devices": []}
 
         return JSONResponse(data)
+
+    @app.get("/api/activity")
+    def get_activity(source: str = "all", model: str = "", endpoint: str = "", state: str = "",
+                     from_ts: float | None = None, to_ts: float | None = None,
+                     sort: str = "time", order: str = "desc", cursor: str | None = None,
+                     limit: int = 50):
+        if source == "proxy" and proxy.history is None:
+            return JSONResponse({"error": proxy.capture_error or "Proxy history unavailable"}, status_code=503)
+        try:
+            result = ActivityHistory(db).list(source=source, model=model, endpoint=endpoint, state=state,
+                from_ts=from_ts, to_ts=to_ts, sort=sort, order=order, cursor=cursor,
+                limit=limit, include_proxy=proxy.history is not None)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        result["database_path"] = db.path
+        result["log_status"] = {k: follower.snapshot()[k] for k in
+                                ("available", "configured", "gap", "error", "prompts_configured")}
+        result["capture_error"] = proxy.capture_error
+        return result
 
     @app.get("/api/history")
     def get_history(model: str = "", state: str = "", from_ts: float | None = None,
