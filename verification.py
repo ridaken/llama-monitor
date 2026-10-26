@@ -9,7 +9,7 @@ import psutil
 from pydantic import BaseModel, Field
 
 import store
-from processes import identity_matches
+from processes import identity_matches, same_identity
 from launcher import LaunchError
 
 
@@ -57,7 +57,7 @@ class ManagedVerification:
 
     def _unchanged(self, snapshot):
         current = self._snapshot()
-        if any(current[key] != snapshot[key] for key in ("pid", "created_at", "run_id")):
+        if current["run_id"] != snapshot["run_id"] or not same_identity(snapshot, current):
             raise VerificationError("Managed server changed during verification.")
         if self.gaming.state()["blocked"]:
             raise VerificationError("Model switching or recovery blocks verification.")

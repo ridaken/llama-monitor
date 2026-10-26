@@ -113,6 +113,11 @@ def main():
             assert cli("configs", "list")["configs"][0] == config
             assert cli("configs", "show", "smoke") == config
             assert cli("launch", "--config", "smoke", "--wait", "--timeout", "30")["readiness"]["ready"]
+            # Real Linux procfs identity must tolerate wall-clock shifts without
+            # changing the host clock or the backend's persisted state.
+            assert exec_python("import processes, store; r=store.get_running()['identity']; "
+                               "assert r['boot_id'] and isinstance(r['start_ticks'], int); "
+                               "r['created_at'] -= 1; print(processes.identity_matches(r))") == "True"
             eventually(lambda: request("/health", inference=True)["status"] == "ok")
             assert cli("smoke", "--timeout", "10")["message"]["content"] == "smoke response"
             assert not cli("proxy", "status")["enabled"]
