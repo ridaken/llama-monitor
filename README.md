@@ -53,8 +53,8 @@ There is no cloud account or model download step.
 
 **Monitor** combines model controls, saved configurations, and telemetry.
 **Manage** holds executable selection, proxy controls, and native Windows integrations.
-**Requests** explores captured proxy request/response pairs.
-**History** explores saved generations and optional native prompts. Log collection and
+**History** combines captured proxy request/response pairs, monitored generations,
+and optional native prompts in one timeline, with All / Proxied / Monitored filters. Log collection and
 Windows coordination run without an open browser; live chart samples are kept in
 the browser and restart on reload. The browser retains up to 60 samples per trend,
 with a three-sample average for decode speed, so the displayed time span varies
@@ -341,7 +341,7 @@ Gaming, and startup settings:
   program and opens a dialog with the reply, elapsed time, and route used.
   It uses the inference proxy when enabled, otherwise connects directly. An
   unavailable enabled proxy reports an error instead of being bypassed. Proxy
-  tests appear in **Requests** using the existing capture settings; direct
+  tests appear in **History → Proxied** using the existing capture settings; direct
   tests do not create proxy records. The test uses a 2,048-token output limit
   and a 120-second deadline. Reasoning and incomplete output are identified in
   the dialog. Generated code is displayed, never executed. This also works
@@ -576,8 +576,12 @@ refresh). These intervals are delays after a response, not fixed deadlines. The 
 
 ## Activity history
 
-Open **History** in the navigation to filter by model, state, or date and
-sort by time, total duration, prompt tokens, or generated tokens. Each record
+Open **History** in the navigation for a combined timeline of proxied and monitored
+activity. Filter by source, model, outcome, endpoint, or date and sort by time,
+duration, prompt tokens, or generated tokens. Endpoint filters show proxied records
+only. Proxied duration measures elapsed request time; monitored duration measures
+server generation time. Missing values appear as unavailable and sort last.
+Use **Refresh** to return to the first page with current results. Each monitored record
 shows its run, slot, and task when known. Missing timing lines remain marked
 **incomplete**; timing lines without a slot are **ambiguous** and are never
 combined with another slot's timings. Log unavailability or rotation can cause
@@ -600,7 +604,7 @@ their prompts appear as separate **Prompt only** entries. External servers can
 use `--llama-prompts-dir` to point llama-monitor at an existing prompt directory.
 
 History is stored at `~/.llama-monitor/history.sqlite` using SQLite WAL mode.
-There is no automatic expiry or row limit; **Clear history…** deletes saved
+There is no automatic expiry or row limit; **Clear monitored history** deletes saved
 generation and prompt records after confirmation, removes managed prompt files,
 and keeps the current log cursor so old lines do not reappear. External prompt
 files and the raw server log retain their existing lifecycles. JSONL currently
@@ -634,15 +638,18 @@ includes streaming and non-streaming `/v1/chat/completions`, `/v1/completions`,
 and `/completion`, including reasoning and tool calls. Other HTTP endpoints pass
 through without readable content capture; no additional upstream routing is done.
 
-Open **Requests** for paired prompts/responses, model/endpoint/outcome/date filters,
+Select **History → Source → Proxied** for paired prompts/responses, model/endpoint/outcome/date filters,
 HTTP status, duration, first observed generated content, usage when supplied,
 and request IDs. First-token timing for non-streaming JSON is observed when the
 complete JSON response is received, not a measurement of upstream token generation.
-Activity **History** remains the separate source for server-log timings; requests
-are never matched to generations by timestamp. There is no automatic refresh of
-the Requests list: use **Refresh** to inspect recently completed requests.
+Choose **Monitored** for server-log timings or **All** for both sources. A proxied
+inference may also have a monitored observation: both remain visible with source
+labels, without guessed associations or deduplication. Old `#requests` links open
+History with the Proxied filter. Use **Refresh** to inspect recently completed requests.
 
-Proxy records share `history.sqlite` but have their own **Clear requests** action.
+Proxy records share `history.sqlite` but have their own **Clear proxy history** action.
+Both clear actions require confirmation and affect every record in the selected
+source, regardless of filters; the other source is preserved.
 They remain until cleared. Authentication headers and query strings are not saved.
 Image/binary inputs are replaced with omission markers. Each saved payload is
 limited to 1 MiB; truncation affects capture only. Incomplete, cancelled, or

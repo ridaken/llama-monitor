@@ -134,6 +134,34 @@ def test_history_prompt_detail_and_prompt_only_filter(client, tmp_path):
     assert client.get(f"/api/history/{row['id']}/prompt").status_code == 404
 
 
+def test_activity_api_coverage_fallback_and_validation(client, tmp_path):
+    db = HistoryDB(str(tmp_path / "history.sqlite"))
+    db.ensure_run("activity-run", "external", 1)
+    db.add_prompt_file("activity-run", str(tmp_path / "prompt.txt"), 10, "private native prompt", False)
+    proxy = client.app.state.proxy
+    metadata = {"id": "proxy1", "observed_at": 11, "endpoint": "/completion", "model": "Proxy model",
+                "state": "complete", "usage": {"prompt_tokens": 0, "completion_tokens": 3}}
+    proxy.history.begin(metadata)
+    proxy.history.finish(metadata, "private request", "private response")
+    result = client.get("/api/activity").json()
+    assert [row["source"] for row in result["items"]] == ["proxy", "monitored"]
+    assert result["items"][0]["prompt_tokens"] == 0
+    assert result["items"][0]["generated_tokens"] == 3
+    assert "private" not in json.dumps(result)
+    assert "log_status" in result and "capture_error" in result and "database_path" in result
+    assert client.get("/api/activity", params={"limit": 0}).status_code == 400
+    assert client.get("/api/activity", params={"source": "unknown"}).status_code == 400
+    assert client.get("/api/activity", params={"limit": "text"}).status_code == 422
+    assert len(client.get("/api/history").json()["items"]) == 1
+    assert len(client.get("/api/requests").json()["items"]) == 1
+    proxy.history = None
+    proxy.capture_error = "Storage unavailable"
+    result = client.get("/api/activity").json()
+    assert len(result["items"]) == 1 and result["items"][0]["source"] == "monitored"
+    assert result["capture_error"] == "Storage unavailable"
+    assert client.get("/api/activity", params={"source": "proxy"}).status_code == 503
+
+
 def test_console_decodes_jsonl_and_resumes_at_byte_offset(client):
     with open(store.MANAGED_LOG, "wb") as f:
         f.write((json.dumps({"type": "log", "msg": "server ready"}) + "\n").encode())

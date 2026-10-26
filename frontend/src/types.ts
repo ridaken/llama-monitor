@@ -193,6 +193,8 @@ export type Activity = {
   total_seconds?: number | null
   draft_accepted?: number | null
   draft_generated?: number | null
+  draft_accept_rate?: number | null
+  draft_mean_len?: number | null
 }
 export type HistoryPage = {
   items: Activity[]
@@ -221,4 +223,36 @@ export type TestPromptResult = {
     reasoning?: string | null
   }
   usage: Record<string, unknown> | null
+}
+
+export type RequestRecord = {
+  id: string
+  observed_at: number
+  endpoint: string
+  target: string
+  run_id?: string | null
+  model?: string | null
+  state: string
+  status_code?: number | null
+  duration_seconds?: number
+  first_token_seconds?: number | null
+  usage?: Record<string, unknown> | null
+  prompt_logging: boolean
+  response_logging: boolean
+  request_truncated?: boolean
+  response_truncated?: boolean
+  capture_invalid?: boolean
+  request_text?: string | null
+  response_text?: string | null
+}
+
+export type ActivityRecord = Omit<Activity, 'run_id'> &
+  Partial<Omit<RequestRecord, 'id' | 'model' | 'run_id'>> & {
+    source: 'proxy' | 'monitored'
+    record_id: string
+    run_id?: string | null
+  }
+export type ActivityPage = Omit<HistoryPage, 'items'> & {
+  items: ActivityRecord[]
+  capture_error?: string | null
 }

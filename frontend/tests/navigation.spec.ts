@@ -100,7 +100,7 @@ test('history cursor paging and coverage warning remain visible', async ({
   page,
 }) => {
   const calls = await mockApi(page, {
-    'GET /api/history': (req) => {
+    'GET /api/activity': (req) => {
       const cursor = new URL(req.url()).searchParams.get('cursor')
       return {
         ...historyPage,
@@ -117,7 +117,7 @@ test('history cursor paging and coverage warning remain visible', async ({
     .poll(() => calls.some((call) => call.includes('cursor=opaque-next')))
     .toBe(true)
   await expect(page.locator('#history-body')).toContainText(
-    'No observed generations',
+    'No history records',
   )
   await page.locator('#history-prev').click()
   await expect(page.locator('#history-body')).toContainText('Qwen test')
@@ -421,7 +421,7 @@ test('built page works with the real isolated FastAPI API', async ({
     'page',
   )
   await expect(page.locator('#history-body')).toContainText(
-    'No observed generations',
+    'No history records',
   )
 })
 
@@ -494,7 +494,7 @@ test('visual review captures offline, empty and error states', async ({
   test.skip(process.env.CAPTURE_UI !== '1')
   await mockApi(page, {
     'GET /api/stats': () => ({ online: false, active: false }),
-    'GET /api/history': () => ({
+    'GET /api/activity': () => ({
       ...historyPage,
       items: [],
       models: [],
@@ -512,7 +512,7 @@ test('visual review captures offline, empty and error states', async ({
     'page',
   )
   await expect(page.locator('#history-body')).toContainText(
-    'No observed generations',
+    'No history records',
   )
   await page.screenshot({
     path: 'test-results/history-empty.png',
@@ -521,7 +521,7 @@ test('visual review captures offline, empty and error states', async ({
   await page.unroute('**/api/**')
   await mockApi(page, {
     'GET /api/stats': () => ({ online: false, active: false }),
-    'GET /api/history': () => ({
+    'GET /api/activity': () => ({
       status: 500,
       body: { error: 'Test failure' },
     }),

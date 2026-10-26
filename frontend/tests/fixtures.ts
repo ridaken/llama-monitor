@@ -135,7 +135,9 @@ export const stats = {
 export const historyPage = {
   items: [
     {
-      id: 'h1',
+      id: 'monitored:h1',
+      record_id: 'h1',
+      source: 'monitored',
       run_id: 'run-123456',
       slot_id: 0,
       task_id: 7,
@@ -217,6 +219,7 @@ export async function mockApi(
           },
         ],
       }
+    else if (path === '/api/activity') body = historyPage
     else if (path === '/api/history')
       body = request.method() === 'DELETE' ? { deleted: 1 } : historyPage
     else if (path === '/api/history/h1/prompt')

@@ -43,6 +43,20 @@ def test_routes(invoke, arguments, path):
     assert calls[0].method == ("POST" if arguments[0] in ("restart", "stop") else "GET")
 
 
+def test_activity_cli_filters_and_envelope(invoke):
+    arguments = ["activity", "list", "--source", "proxy", "--model", "Model", "--endpoint", "/completion",
+                 "--state", "complete", "--sort", "duration", "--order", "asc", "--from-ts", "1",
+                 "--to-ts", "2", "--cursor", "opaque", "--limit", "10"]
+    code, output, calls = invoke(arguments, lambda _: {"items": [], "next_cursor": None})
+    assert code == 0 and output["ok"]
+    assert calls[0].url.path == "/api/activity"
+    assert dict(calls[0].url.params) == {"source": "proxy", "model": "Model", "endpoint": "/completion",
+        "state": "complete", "sort": "duration", "order": "asc", "from_ts": "1.0", "to_ts": "2.0",
+        "cursor": "opaque", "limit": "10"}
+    code, _, calls = invoke(["activity", "list", "--limit", "0"], lambda _: pytest.fail("no HTTP"))
+    assert code == 2 and not calls
+
+
 def test_global_options_work_before_and_after_subcommands(invoke):
     code, _, calls = invoke(["--url", "http://example.test:9000", "--request-timeout", "7", "configs", "list"],
                             lambda _: {"configs": []})

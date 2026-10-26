@@ -85,14 +85,17 @@ def parser():
     listing.add_argument("--limit", type=int, default=50)
     requests.add_parser("show", parents=[common]).add_argument("id")
     requests.add_parser("clear", parents=[common]).add_argument("--yes", action="store_true")
-    for name in ("configs", "history", "gaming", "startup"):
+    for name in ("configs", "history", "activity", "gaming", "startup"):
         group = commands.add_parser(name, parents=[common])
         subs = group.add_subparsers(dest="action", required=True, parser_class=Parser)
         if name == "configs":
             subs.add_parser("list", parents=[common])
             subs.add_parser("show", parents=[common]).add_argument("name")
-        elif name == "history":
+        elif name in ("history", "activity"):
             history = subs.add_parser("list", parents=[common])
+            if name == "activity":
+                history.add_argument("--source", choices=("all", "proxy", "monitored"), default="all")
+                history.add_argument("--endpoint")
             for flag in ("model", "state", "cursor"):
                 history.add_argument(f"--{flag}")
             for flag in ("from-ts", "to-ts"):
@@ -237,11 +240,17 @@ def execute(args, client):
             raise CLIError(result.get("error") or "Server log is unavailable.")
         result["content"] = "\n".join(result.get("content", "").splitlines()[-args.tail:])
         return result
-    if command == "history":
+    if command in ("history", "activity"):
+        if command == "activity" and not 1 <= args.limit <= 200:
+            raise CLIError("--limit must be between 1 and 200.", 2)
         params = {key: getattr(args, key) for key in
                   ("model", "state", "cursor", "from_ts", "to_ts", "sort", "order", "limit")
                   if getattr(args, key) is not None}
-        return client.request("GET", "/api/history", params=params)
+        if command == "activity":
+            params["source"] = args.source
+            if args.endpoint:
+                params["endpoint"] = args.endpoint
+        return client.request("GET", f"/api/{command}", params=params)
     if command in ("gaming", "startup"):
         return client.request("GET", f"/api/{command}/state")
     if command in ("smoke", "test-prompt"):

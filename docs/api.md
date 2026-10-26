@@ -211,6 +211,33 @@ curl -X POST http://127.0.0.1:8500/api/configs \
   -H 'Content-Type: application/json' --data-binary @config.json
 ```
 
+## Unified activity timeline
+
+`GET /api/activity` returns `{items, next_cursor, models, database_path, log_status,
+capture_error}` for the combined History view. It accepts `source=all|proxy|monitored`
+(default `all`), exact `model`, `endpoint`, and `state` filters, inclusive `from_ts`
+and exclusive `to_ts` Unix seconds, `sort=time|duration|prompt_tokens|generated_tokens`,
+`order=asc|desc`, `limit` (1–200, default 50), and an opaque `cursor`.
+
+Default order is newest first. Supported states are the union of history states
+below and proxy outcomes (`cancelled`, `interrupted`). Endpoint filtering excludes
+monitored records. Models include identities from both available sources.
+
+Each item has a source-qualified `id`, original `record_id`, `source` (`proxy` or
+`monitored`), `observed_at`, `model`, `state`, `endpoint`, `total_seconds`,
+`prompt_tokens`, `generated_tokens`, and source-specific metadata. Proxy usage maps
+`completion_tokens` to `generated_tokens`; unknown values stay null. Duration is
+elapsed proxy request time or monitored generation time. Payload text is excluded;
+retrieve it using the existing request-detail or native-prompt endpoints below.
+There is no correlation or deduplication between sources.
+
+Missing sort values come last in both directions; source and original ID break
+ties. Cursors are versioned and bound to filters and sorting: keep these unchanged
+when paging. Invalid filters, limits, or cursors return HTTP 400; invalid typed
+parameters return 422. If proxy storage is unavailable, All returns monitored
+records with `capture_error`, while proxy-only queries return 503. No data migration
+is required. Existing history/request APIs and their clear operations are unchanged.
+
 ## History and prompts
 
 | Method and route | Inputs | Response, failures, and effects |

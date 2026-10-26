@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { mockApi } from './fixtures'
+import { historyPage, mockApi } from './fixtures'
 
 const proxy = {
   enabled: false,
@@ -69,15 +69,27 @@ test('Manage proxy toggles persist and expose listener errors', async ({
   )
 })
 
-test('Requests filters, pagination, safe details and confirmed clearing', async ({
+test('Proxied history filters, pagination, safe details and confirmed clearing', async ({
   page,
 }) => {
   let cleared = false
   const calls = await mockApi(page, {
-    'GET /api/requests': (request) => {
+    'GET /api/activity': (request) => {
       const cursor = new URL(request.url()).searchParams.get('cursor')
       return {
-        items: cleared || cursor ? [] : [record],
+        items:
+          cleared || cursor
+            ? []
+            : [
+                {
+                  ...record,
+                  id: 'proxy:proxy-one',
+                  source: 'proxy',
+                  record_id: 'proxy-one',
+                },
+              ],
+        models: ['Test model'],
+        log_status: historyPage.log_status,
         next_cursor: cleared || cursor ? null : 'next-one',
       }
     },
@@ -89,13 +101,14 @@ test('Requests filters, pagination, safe details and confirmed clearing', async 
   })
   await page.goto('/#requests')
   await expect(
-    page.getByRole('link', { name: 'Requests', exact: true }),
+    page.getByRole('link', { name: 'History', exact: true }),
   ).toHaveAttribute('aria-current', 'page')
-  await page.locator('#requests-model').fill('Test model')
+  await page.locator('#history-model').click()
+  await page.getByRole('option', { name: 'Test model', exact: true }).click()
   await expect
     .poll(() => calls.some((call) => call.includes('model=Test+model')))
     .toBe(true)
-  await page.getByRole('button', { name: 'View request', exact: true }).click()
+  await page.getByRole('button', { name: 'View details', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toContainText('Saved output may be partial')
   await expect(dialog).toContainText('Truncated at the 1 MiB')
@@ -109,23 +122,38 @@ test('Requests filters, pagination, safe details and confirmed clearing', async 
     .toBe(true)
   await page.getByRole('button', { name: 'Previous', exact: true }).click()
   await page
-    .getByRole('button', { name: 'Clear requests', exact: true })
+    .getByRole('button', { name: 'Clear proxy history', exact: true })
     .click()
   expect(calls).not.toContain('DELETE /api/requests')
   await page
-    .getByRole('button', { name: 'Delete all requests', exact: true })
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Clear proxy history', exact: true })
     .click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect.poll(() => calls.includes('DELETE /api/requests')).toBe(true)
   await expect(
-    page.getByText('No proxy requests.', { exact: false }),
+    page
+      .locator('#history-body')
+      .getByText('No history records', { exact: false }),
   ).toBeVisible()
 })
 
-test('Requests remains usable on a narrow viewport', async ({ page }) => {
+test('Proxied history remains usable on a narrow viewport', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockApi(page, {
-    'GET /api/requests': () => ({ items: [record], next_cursor: null }),
+    'GET /api/activity': () => ({
+      ...historyPage,
+      items: [
+        {
+          ...record,
+          source: 'proxy',
+          record_id: 'proxy-one',
+          id: 'proxy:proxy-one',
+        },
+      ],
+    }),
   })
   await page.goto('/#requests')
   await expect(page.getByLabel('Endpoint', { exact: true })).toBeVisible()
