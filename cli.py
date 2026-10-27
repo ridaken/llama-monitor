@@ -63,6 +63,11 @@ def parser():
     wait.add_argument("--timeout", type=positive, default=300)
     logs = commands.add_parser("logs", parents=[common])
     logs.add_argument("--tail", type=int, default=100)
+    log_selection = logs.add_mutually_exclusive_group()
+    log_selection.add_argument("--runs", action="store_true", help="List retained diagnostic runs")
+    log_selection.add_argument("--run", metavar="ID", help="Read a retained diagnostic run")
+    logs.add_argument("--cursor", default="", help="Continue the retained run listing")
+    logs.add_argument("--limit", type=int, default=50, help="Number of runs to list (1-200)")
     smoke = commands.add_parser("smoke", parents=[common])
     smoke.add_argument("--timeout", type=positive, default=60, help="Overall probe deadline, at most 300 seconds")
     test_prompt = commands.add_parser("test-prompt", parents=[common], help="Send the fixed FizzBuzz request using the configured route")
@@ -233,9 +238,15 @@ def execute(args, client):
     if command == "stats":
         return client.request("GET", "/api/stats")
     if command == "logs":
+        if args.runs:
+            if not 1 <= args.limit <= 200:
+                raise CLIError("--limit must be between 1 and 200.", 2)
+            return client.request("GET", "/api/launcher/log-runs", params={"limit": args.limit, "cursor": args.cursor})
+        if args.cursor:
+            raise CLIError("--cursor requires --runs.", 2)
         if args.tail <= 0:
             raise CLIError("--tail must be positive.", 2)
-        result = client.request("GET", "/api/launcher/console")
+        result = client.request("GET", "/api/launcher/console", params={"run_id": args.run} if args.run else None)
         if not result.get("available"):
             raise CLIError(result.get("error") or "Server log is unavailable.")
         result["content"] = "\n".join(result.get("content", "").splitlines()[-args.tail:])
@@ -359,7 +370,7 @@ def main(argv=None):
             print(json.dumps(result["data"], indent=2, ensure_ascii=True))
         else:
             print(result["error"]["message"], file=sys.stderr)
-    elif isinstance(data, dict) and args.command == "logs":
+    elif isinstance(data, dict) and args.command == "logs" and not args.runs:
         print(data["content"])
     else:
         print(json.dumps(data, indent=2, ensure_ascii=True))

@@ -22,6 +22,7 @@ import json
 import secrets
 import logging
 import logging.config
+import managed_logs
 import string
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
@@ -144,6 +145,7 @@ def build_app(args) -> FastAPI:
             pass
 
     manager = ServerManager(retarget, finish_log=follower.finish_segment)
+    managed_logs.reconcile()
 
     # If a previous dashboard run launched a server that's still alive, re-adopt
     # it and point monitoring at it — so killing and relaunching the dashboard
@@ -204,7 +206,7 @@ def build_app(args) -> FastAPI:
             gaming.close()
             try:
                 if runtime.containerized() or test_mode:
-                    manager.stop()
+                    manager.stop(reason="test_shutdown" if test_mode else "container_shutdown")
             finally:
                 follower.stop()
                 rt["llama"].close()
@@ -657,8 +659,16 @@ def build_app(args) -> FastAPI:
     # ship a huge file on the initial fetch.
     CONSOLE_HEAD = 256 * 1024
 
+    @app.get("/api/launcher/log-runs")
+    def get_log_runs(limit: int = 50, cursor: str = "") -> JSONResponse:
+        try:
+            managed_logs.reconcile()
+            return JSONResponse(managed_logs.list_runs(limit, cursor))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
     @app.get("/api/launcher/console")
-    def get_console(offset: int = 0, source: str = "") -> JSONResponse:
+    def get_console(offset: int = 0, source: str = "", run_id: str = "", cursor: str = "") -> JSONResponse:
         """Stream the active server log (console output) incrementally.
 
         Reads the currently-monitored log (the managed log for launched servers,
@@ -666,6 +676,18 @@ def build_app(args) -> FastAPI:
         truncation handling so a restart/rotation re-reads from the top.
         """
         path = rt["log_path"] or store.MANAGED_LOG
+        if run_id or path == store.MANAGED_LOG:
+            captured = manager.run_id if manager.run_id and managed_logs.load(manager.run_id) else None
+            legacy = os.path.isfile(path) or os.path.isfile(startup_log_path())
+            selected = run_id or captured or (None if legacy else managed_logs.latest())
+            if selected:
+                try:
+                    return JSONResponse(managed_logs.console(selected, cursor, offset, follow_latest=not run_id))
+                except ValueError as exc:
+                    return JSONResponse({"error": str(exc)}, status_code=400)
+                except FileNotFoundError as exc:
+                    return JSONResponse({"available": False, "content": "", "error": str(exc),
+                                         "offset": 0, "size": 0, "path": "", "reset": True})
         selected_source = "managed" if path == store.MANAGED_LOG else "external"
         # Keep structured logs/history free of duplicate stderr output. Only
         # fall back to process output when the managed log has no bytes yet.

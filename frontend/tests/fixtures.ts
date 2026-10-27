@@ -203,6 +203,8 @@ export async function mockApi(
     else if (path === '/api/gaming/state') body = gamingState
     else if (path === '/api/startup/state') body = startupState
     else if (path === '/api/launcher/state') body = launcherState
+    else if (path === '/api/launcher/log-runs')
+      body = { items: [], next_cursor: null }
     else if (path === '/api/launcher/flags')
       body = {
         source: 'help',

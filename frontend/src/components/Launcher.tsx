@@ -648,11 +648,20 @@ export function LauncherDialogs({
     goBrowse,
     chooseFile,
     consolePath,
+    consoleRuns,
+    consoleRun,
+    setConsoleRun,
+    consoleRunCursor,
+    loadConsoleRuns,
+    consoleLogError,
     consoleOffset,
     consoleText,
     consolePreRef,
     consoleStickRef,
   } = launcher
+  const selectedLogRun =
+    consoleRuns.find((run) => run.run_id === consoleRun) ||
+    (!consoleRun ? consoleRuns[0] : undefined)
   return (
     <>
       <Dialog
@@ -853,6 +862,63 @@ export function LauncherDialogs({
               {consolePath} · offset {consoleOffset}
             </DialogDescription>
           </DialogHeader>
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="console-run" className="text-sm">
+              Model run
+            </label>
+            <select
+              id="console-run"
+              className="min-w-0 flex-1 rounded-md border border-border bg-background p-2 text-sm"
+              value={consoleRun}
+              onChange={(event) => setConsoleRun(event.target.value)}
+            >
+              <option value="">Current / latest run</option>
+              {consoleRuns.map((run) => (
+                <option key={run.run_id} value={run.run_id}>
+                  {run.config_name || 'Unnamed model'} ·{' '}
+                  {new Date(run.started_at * 1000).toLocaleString()} ·{' '}
+                  {run.state}
+                  {run.stop_reason
+                    ? ` · ${run.stop_reason.replaceAll('_', ' ')}`
+                    : ''}
+                  {run.exit_code !== null ? ` · exit ${run.exit_code}` : ''}
+                  {run.gap || run.startup_truncated ? ' · partial logs' : ''}
+                </option>
+              ))}
+            </select>
+            <Button variant="outline" onClick={() => void loadConsoleRuns()}>
+              Refresh runs
+            </Button>
+            {consoleRunCursor && (
+              <Button
+                variant="outline"
+                onClick={() => void loadConsoleRuns(consoleRunCursor)}
+              >
+                Older runs
+              </Button>
+            )}
+          </div>
+          {selectedLogRun && (
+            <p className="break-words text-sm text-muted-foreground">
+              {selectedLogRun.config_name || 'Unnamed model'} ·{' '}
+              {new Date(selectedLogRun.started_at * 1000).toLocaleString()} ·{' '}
+              {selectedLogRun.state}
+              {selectedLogRun.stop_reason
+                ? ` · ${selectedLogRun.stop_reason.replaceAll('_', ' ')}`
+                : ''}
+              {selectedLogRun.exit_code !== null
+                ? ` · exit ${selectedLogRun.exit_code}`
+                : ''}
+              {selectedLogRun.startup_truncated
+                ? ' · startup capture truncated'
+                : ''}
+            </p>
+          )}
+          {consoleLogError && (
+            <p role="status" className="text-sm text-amber-400">
+              {consoleLogError}
+            </p>
+          )}
           <pre
             id="console-out"
             ref={consolePreRef}

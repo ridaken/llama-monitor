@@ -172,6 +172,18 @@ export type Stats = {
   }
 }
 export type Timing = { tokens: number; secs: number; tps?: number | null }
+export type LogRun = {
+  run_id: string
+  config_name: string
+  started_at: number
+  ended_at: number | null
+  state: string
+  stop_reason: string | null
+  exit_code: number | null
+  gap: boolean
+  logging_error: string | null
+  startup_truncated: boolean
+}
 export type RuntimeInfo = {
   containerized: boolean
   models_dir: string | null

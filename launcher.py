@@ -2,8 +2,8 @@
 
 The dashboard owns three flags so it can monitor whatever it launches:
 ``--port`` (so it knows where to poll), ``--metrics`` (throughput/KV gauges) and
-``--log-file`` pointed at :data:`store.MANAGED_LOG` (activity detection + exact
-per-request stats). The user supplies the model path, the port value and any
+``--log-file`` disabled in favor of the detached filtered capture supervisor
+(activity detection + exact per-request stats). The user supplies the model path, the port value and any
 other flags; those three are injected at launch.
 
 Single-instance by design: launching while a server is running stops the old one
@@ -24,6 +24,8 @@ from typing import Callable, Optional
 import store
 import runtime
 import flags as flags_mod
+import managed_logs
+import log_capture
 from processes import capture_process, identity_matches, same_identity, same_path, terminate_verified
 
 try:
@@ -110,7 +112,7 @@ def resolve_binary(path: Optional[str]) -> Optional[str]:
 
 
 def startup_log_path() -> str:
-    """Separate process output from the structured log used for history."""
+    """Legacy process-output path, retained for existing servers until relaunch."""
     return store.MANAGED_LOG + ".startup"
 
 
@@ -132,6 +134,8 @@ class ServerManager:
         self.started_at: Optional[float] = None
         self.exit_code: Optional[int] = None
         self.last_error: Optional[str] = None
+        self.run_id: Optional[str] = None
+        self._was_adopted = False
         # Tells an explicit Stop apart from a crash: only a process that exits on
         # its own is reported as "exited (code N)".
         self._stopped_by_user = False
@@ -158,7 +162,8 @@ class ServerManager:
                 state = "running"
             elif self._stopped_by_user:
                 state = "stopped"
-            elif self.current is not None and self.exit_code is not None:
+            elif self.current is not None and (self.exit_code is not None or
+                    (self.run_id and managed_logs.load(self.run_id).get("state") in ("exited", "interrupted"))):
                 state = "exited"
             else:
                 state = "stopped"
@@ -170,7 +175,8 @@ class ServerManager:
                 "exit_code": self.exit_code,
                 "started_at": self.started_at,
                 "last_error": self.last_error,
-                "adopted": self._adopted_pid is not None,
+                "adopted": self._adopted_pid is not None or (self._proc is not None and self._was_adopted),
+                "logging_error": (managed_logs.load(self.run_id).get("logging_error") if self.run_id else None),
             }
 
     def adopt(self) -> Optional[dict]:
@@ -216,6 +222,12 @@ class ServerManager:
             self._identity = actual
             self.exit_code = None
             self._stopped_by_user = False
+            self.run_id = rec["run_id"]
+            captured = managed_logs.load(self.run_id)
+            if captured.get("pid") == pid:
+                self._proc = log_capture.CapturedProcess(self.run_id, captured)
+                self._adopted_pid = None
+                self._was_adopted = True
         return rec
 
     # -- argv --------------------------------------------------------------- #
@@ -243,16 +255,33 @@ class ServerManager:
         for flag in ("--log-jsonl", "--log-timestamps"):
             if flag in supported:
                 argv.append(flag)
+        if "--log-jsonl" not in supported and "--log-prefix" in supported:
+            argv.append("--log-prefix")
         if config.get("log_prompts"):
             if "--log-prompts-dir" not in supported:
                 raise LaunchError("This llama-server build does not support prompt logging.")
             argv += ["--log-prompts-dir", store.PROMPTS_DIR]
-        argv += ["--log-file", store.MANAGED_LOG]
-        return argv
+        return self._capture_argv(argv)
+
+    @staticmethod
+    def _capture_argv(argv):
+        # Remove monitor-owned file sinks, including legacy recovery snapshots.
+        result = []
+        index = 0
+        while index < len(argv):
+            if argv[index] == "--log-file":
+                index += 2
+                continue
+            if argv[index].startswith("--log-file="):
+                index += 1
+                continue
+            result.append(argv[index])
+            index += 1
+        return result + ["--log-file", os.devnull]
 
     # -- lifecycle ---------------------------------------------------------- #
 
-    def launch(self, config: dict, *, _snapshot: Optional[dict] = None) -> dict:
+    def launch(self, config: dict, *, _snapshot: Optional[dict] = None, _reason: str = "replacement_launch") -> dict:
         settings = store.get_settings()
         binary = resolve_binary(_snapshot["executable"] if _snapshot else settings.get("llama_server_path"))
         if not binary:
@@ -278,44 +307,32 @@ class ServerManager:
             raise LaunchError("Docker uses internal port 8001. Change INFERENCE_PORT in .env to publish another host port.")
         config = {**config, "port": port}
 
-        argv = list(_snapshot["argv"]) if _snapshot else self.build_argv(config, binary)
+        argv = self._capture_argv(list(_snapshot["argv"])) if _snapshot else self.build_argv(config, binary)
         cwd = _snapshot["cwd"] if _snapshot else os.path.dirname(binary) or None
 
         with self._lock:
             self._refresh()
             if self._proc is not None or self._adopted_pid is not None:
-                self._stop_locked()
+                self._stop_locked(_reason)
             if self._finish_log:
                 self._finish_log()
             store._ensure_dir()
-            # Truncate the managed log so the tailer starts clean for this run.
+            managed_logs.reconcile()
+            managed_logs.import_legacy()
+            self.run_id = uuid.uuid4().hex
             try:
-                open(store.MANAGED_LOG, "w").close()
-            except Exception:
-                pass
-            try:
-                # A loader/CUDA crash can precede --log-file initialization.
-                # A file (rather than a pipe/thread) also survives this backend.
-                with open(startup_log_path(), "wb") as output:
-                    self._proc = subprocess.Popen(
-                        argv,
-                        stdin=subprocess.DEVNULL,
-                        stdout=output,
-                        stderr=subprocess.STDOUT,
-                        cwd=cwd,
-                        creationflags=_DETACH_FLAGS,
-                        **_DETACH_KW,
-                    )
+                self._proc = log_capture.launch(argv, cwd, self.run_id, config.get("name"))
             except Exception as e:
                 self._proc = None
                 self.last_error = str(e)
                 raise LaunchError(f"Failed to start llama-server: {e}")
 
             self.current = config
-            self.started_at = time.time()
+            self.started_at = managed_logs.load(self.run_id).get("started_at", time.time())
             self.exit_code = None
             self.last_error = None
             self._stopped_by_user = False
+            self._was_adopted = False
             try:
                 self._identity = capture_process(self._proc.pid)
             except Exception:
@@ -328,7 +345,8 @@ class ServerManager:
                 "port": port,
                 "config": config,
                 "started_at": self.started_at,
-                "run_id": uuid.uuid4().hex,
+                "run_id": self.run_id,
+                "log_format": "filtered-v1",
                 "log_path": store.MANAGED_LOG,
                 "identity": self._identity,
             })
@@ -337,19 +355,21 @@ class ServerManager:
         self._retarget(f"http://127.0.0.1:{port}", store.MANAGED_LOG, port)
         return self.status()
 
-    def stop(self) -> dict:
+    def stop(self, reason: str = "manual_stop") -> dict:
         with self._lock:
             self._refresh()
             had_server = self._proc is not None or self._adopted_pid is not None
-            self._stop_locked()
+            self._stop_locked(reason)
             if had_server and self._finish_log:
                 self._finish_log()
             self._stopped_by_user = True
             store.set_running(None)
         return self.status()
 
-    def _stop_locked(self) -> None:
+    def _stop_locked(self, reason: str = "manual_stop") -> None:
         proc = self._proc
+        if proc is not None or self._adopted_pid is not None:
+            managed_logs.stop_intent(self.run_id, reason)
         if proc is not None:
             try:
                 if self._identity and not identity_matches(self._identity) and proc.poll() is None:
@@ -358,10 +378,12 @@ class ServerManager:
                 try:
                     proc.wait(timeout=_STOP_GRACE_SECS)
                 except subprocess.TimeoutExpired:
+                    managed_logs.stop_intent(self.run_id, reason, forced=True)
                     proc.kill()
                     proc.wait(timeout=_STOP_GRACE_SECS)
             except Exception as e:
                 self.last_error = str(e)
+                managed_logs.stop_intent(self.run_id, reason, failed=True)
                 raise LaunchError(f"Failed to stop llama-server: {e}") from e
             if proc.poll() is None:
                 raise LaunchError("llama-server is still running after termination.")
@@ -404,4 +426,4 @@ class ServerManager:
     def restart(self) -> dict:
         if self.current is None:
             raise LaunchError("Nothing to restart — no configuration launched yet.")
-        return self.launch(self.current)
+        return self.launch(self.current, _reason="restart")

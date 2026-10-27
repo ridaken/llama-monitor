@@ -17,6 +17,7 @@ import sqlite3
 import threading
 import time
 import uuid
+import managed_logs
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
@@ -418,6 +419,7 @@ class LogFollower:
             self.model = None
             self._model_dirty = False
             self.managed = managed
+            self.filtered = bool(managed and run_id and managed_logs.load(run_id))
             self.file_key = None
             self.offset = 0
             self.available = False
@@ -431,6 +433,17 @@ class LogFollower:
             if not self.path:
                 return
             previous = self.db.get_cursor(self.path)
+            if self.filtered:
+                self.file_key = "filtered:" + run_id
+                self.offset = previous["offset"] if previous and previous["run_id"] == run_id else 0
+                self.gap = bool(previous and previous["run_id"] == run_id and previous["gap"])
+                record = managed_logs.load(run_id)
+                self.started_at = started_at or record["started_at"]
+                self.available = True
+                self.db.ensure_run(run_id, "managed", self.started_at)
+                self.slots = self.db.latest_by_slot(run_id)
+                self._restore_metadata(record)
+                return
             if previous:
                 self.gap = bool(previous["gap"])
             try:
@@ -623,7 +636,11 @@ class LogFollower:
         """Drain a stopped server's final lines before its log is reset."""
         with self.lock:
             try:
-                self.poll()
+                while True:
+                    previous = self.offset
+                    self.poll()
+                    if not getattr(self, "filtered", False) or previous == self.offset:
+                        break
                 self._close_running()
             except Exception as exc:
                 self.error = str(exc)
@@ -637,6 +654,9 @@ class LogFollower:
             if not self.path or not self.run_id:
                 return
             self._poll_prompts()
+            if self.filtered:
+                self._poll_filtered()
+                return
             try:
                 stat = os.stat(self.path)
             except OSError as exc:
@@ -741,6 +761,58 @@ class LogFollower:
                 (self.slots, self.memory, self.baseline, self.spec, self.activity_seq,
                  self.run_id, self.model, self.started_at, self._model_dirty, self.placement) = before
                 raise
+
+    def _restore_metadata(self, record):
+        metadata = record.get("metadata") or {}
+        placement = metadata.get("placement")
+        if placement:
+            self.placement = LayerPlacement()
+            self.placement.__dict__.update(copy.deepcopy(placement))
+            for block in self.placement.blocks:
+                block["layers"] = {int(k): v for k, v in block["layers"].items()}
+            self.placement.current = self.placement.blocks[-1] if placement.get("current") and self.placement.blocks else None
+            self.placement.identities = {k: set(v) for k, v in placement.get("identities", {}).items()}
+        if metadata.get("memory"):
+            self.memory = DeviceMemory()
+            self.memory.__dict__.update(metadata["memory"])
+        self.baseline = dict(metadata.get("baseline", {}))
+        self.spec = metadata.get("spec", False)
+
+    def _poll_filtered(self):
+        record = managed_logs.load(self.run_id)
+        self.available = bool(record)
+        self.error = record.get("logging_error") if record else "Managed diagnostics are no longer retained."
+        if not record:
+            self.gap = True
+            return
+        raw, position, missing = managed_logs.read(self.run_id, self.offset, limit=self.MAX_READ)
+        before = copy.deepcopy(self.slots), self.activity_seq, self.gap
+        try:
+            if missing:
+                self.gap = True
+                self._close_running()
+                self.slots = {}
+            rows = {}
+            for line in raw.splitlines():
+                obj = json.loads(line)
+                if obj.get("type") != "log":
+                    continue
+                msg = obj.get("msg", "")
+                observed = obj.get("observed_at", time.time())
+                if LogTailer._ACT.search(msg) or (not LogTailer._IDLE.search(msg) and not LogTailer._NOISE.search(msg)):
+                    self.activity_seq += 1
+                for row in self._generation(msg, observed):
+                    rows[row["id"]] = row.copy()
+            self.db.save_batch(self.path, self.file_key, position, self.run_id, list(rows.values()), self.gap)
+            self.offset = position
+            self._restore_metadata(record)
+            if record.get("state") in ("exited", "interrupted") and not raw:
+                self._close_running()
+            if self.prompt_dir:
+                self.db.match_prompts(self.run_id)
+        except Exception:
+            self.slots, self.activity_seq, self.gap = before
+            raise
 
     def _generation(self, msg: str, observed: float) -> list[dict]:
         match = self._SLOT.search(msg)
