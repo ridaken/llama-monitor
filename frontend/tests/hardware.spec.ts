@@ -46,6 +46,8 @@ for (const mode of ['Fit', 'Comfortable']) {
       await page.goto('/')
       await page.getByRole('button', { name: mode, exact: true }).click()
       await expect(page.locator('.monitor-gpu')).toHaveCount(3)
+      // Only explicit clock advances should poll while resize checks settle.
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
       if (widerFont)
         await page.addStyleTag({
           content: '.monitor-hardware { font-family: Arial, sans-serif; }',
@@ -97,14 +99,30 @@ for (const mode of ['Fit', 'Comfortable']) {
         await panel.evaluate((el, width) => {
           ;(el as HTMLElement).style.width = `${width}px`
         }, width)
-        await page.clock.runFor(200)
+        // ResizeObserver delivery follows browser layout, not just the mocked
+        // clock. Wait for repeated measurements so Fit has actually settled.
+        let previous = ''
+        let stable = 0
+        await expect
+          .poll(
+            async () => {
+              await page.clock.runFor(100)
+              const current = JSON.stringify(await measure())
+              stable = current === previous ? stable + 1 : 0
+              previous = current
+              return stable
+            },
+            { intervals: [100] },
+          )
+          .toBeGreaterThanOrEqual(2)
       }
       // Locate this font and density's actual one/two-line boundary while
       // retaining four columns, then exercise both sides through real polling.
       let narrow = 1330
-      let wide = await panel.evaluate((el) =>
+      const availableWidth = await panel.evaluate((el) =>
         Math.floor(innerWidth - el.getBoundingClientRect().left - 32),
       )
+      let wide = availableWidth
       await setWidth(narrow)
       expect((await measure()).lines).toBeGreaterThan(1)
       await setWidth(wide)
@@ -115,10 +133,22 @@ for (const mode of ['Fit', 'Comfortable']) {
         if ((await measure()).lines === 1) wide = middle
         else narrow = middle
       }
-      for (const width of [narrow - 2, wide + 2]) {
+      for (const expectedLines of [2, 1]) {
+        let width = expectedLines === 2 ? narrow - 2 : wide + 2
         await setWidth(width)
+        // Fit can choose a different text density when revisiting a width.
+        // Find the requested side again using its current settled density.
+        for (let attempt = 0; attempt < 80; attempt++) {
+          const { lines } = await measure()
+          if (lines === expectedLines) break
+          width += lines > expectedLines ? 16 : -16
+          if (width < 1330 || width > availableWidth) break
+          await setWidth(width)
+        }
         const baseline = await measure()
-        expect(baseline.lines).toBe(width < wide ? 2 : 1)
+        expect(baseline.lines, JSON.stringify({ width, ...baseline })).toBe(
+          expectedLines,
+        )
         for (power of [31, 32, 9, 10, 99, 100, 999, 1000, null]) {
           const previousSamples = await historyLength()
           await page.clock.fastForward(1100)
