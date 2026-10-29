@@ -20,6 +20,143 @@ const hardwareStats = (count: number) => ({
 })
 
 for (const mode of ['Fit', 'Comfortable']) {
+  for (const widerFont of [false, true]) {
+    test(`${mode} Hardware stays stable during power updates${widerFont ? ' with wider fonts' : ''}`, async ({
+      page,
+    }) => {
+      test.setTimeout(60_000)
+      await page.clock.install()
+      let power: number | null = 31
+      await mockApi(page, {
+        'GET /api/stats': () => {
+          const data = hardwareStats(4)
+          return {
+            ...data,
+            gpu: {
+              ...data.gpu,
+              devices: data.gpu.devices.map((device, index) => ({
+                ...device,
+                power: index === 0 ? power : 4,
+              })),
+            },
+          }
+        },
+      })
+      await page.setViewportSize({ width: 3840, height: 1440 })
+      await page.goto('/')
+      await page.getByRole('button', { name: mode, exact: true }).click()
+      await expect(page.locator('.monitor-gpu')).toHaveCount(3)
+      if (widerFont)
+        await page.addStyleTag({
+          content: '.monitor-hardware { font-family: Arial, sans-serif; }',
+        })
+      const panel = page.locator('.monitor-hardware')
+      await panel.locator('.monitor-panel-content').evaluate((el) => {
+        ;(el as HTMLElement).style.paddingInline = '0px'
+      })
+      const gpu = page.locator('.monitor-gpu').first()
+      const badge = gpu.locator('.monitor-gpu-power')
+      const historyLength = () =>
+        gpu
+          .locator('svg')
+          .first()
+          .evaluate(
+            (el) =>
+              el
+                .querySelector('polyline')!
+                .getAttribute('points')!
+                .trim()
+                .split(/\s+/).length,
+          )
+      const measure = () =>
+        gpu.evaluate((card) => {
+          const header = card.querySelector('.monitor-gpu-header')!
+          const name = header.querySelector('strong')!
+          const range = document.createRange()
+          range.selectNodeContents(name)
+          const lines = new Set(
+            Array.from(range.getClientRects(), (rect) => Math.round(rect.top)),
+          ).size
+          const panel = card
+            .closest('.monitor-hardware')!
+            .getBoundingClientRect()
+          return {
+            lines,
+            badgeWidth: header
+              .querySelector('.monitor-gpu-power')!
+              .getBoundingClientRect().width,
+            nameHeight: name.getBoundingClientRect().height,
+            headerHeight: header.getBoundingClientRect().height,
+            cardHeight: card.getBoundingClientRect().height,
+            panelTop: panel.top + window.scrollY,
+            panelBottom: panel.bottom + window.scrollY,
+            panelHeight: panel.height,
+          }
+        })
+      const setWidth = async (width: number) => {
+        await panel.evaluate((el, width) => {
+          ;(el as HTMLElement).style.width = `${width}px`
+        }, width)
+        await page.clock.runFor(200)
+      }
+      // Locate this font and density's actual one/two-line boundary while
+      // retaining four columns, then exercise both sides through real polling.
+      let narrow = 1330
+      let wide = 2400
+      await setWidth(narrow)
+      expect((await measure()).lines).toBeGreaterThan(1)
+      await setWidth(wide)
+      expect((await measure()).lines).toBe(1)
+      while (wide - narrow > 1) {
+        const middle = Math.floor((narrow + wide) / 2)
+        await setWidth(middle)
+        if ((await measure()).lines === 1) wide = middle
+        else narrow = middle
+      }
+      for (const width of [narrow - 2, wide + 2]) {
+        await setWidth(width)
+        const baseline = await measure()
+        expect(baseline.lines).toBe(width < wide ? 2 : 1)
+        for (power of [31, 32, 9, 10, 99, 100, 999, 1000, null]) {
+          const previousSamples = await historyLength()
+          await page.clock.fastForward(1100)
+          await expect(badge).toHaveText(`${power ?? '—'} W`)
+          await expect(page.locator('#gpu-total-w')).toHaveText(
+            `Total draw ${(power ?? 0) + 8} W`,
+          )
+          await expect.poll(historyLength).toBeGreaterThan(previousSamples)
+          await page.clock.runFor(100)
+          const current = await measure()
+          expect(current.lines).toBe(baseline.lines)
+          for (const key of [
+            'badgeWidth',
+            'nameHeight',
+            'headerHeight',
+            'cardHeight',
+            'panelTop',
+            'panelBottom',
+            'panelHeight',
+          ] as const)
+            expect(Math.abs(current[key] - baseline[key]), key).toBeLessThan(1)
+          if (process.env.CAPTURE_UI === '1' && (power === 9 || power === 1000))
+            await panel.screenshot({
+              path: `test-results/hardware-power-${mode}-${widerFont ? 'wide-font' : 'default-font'}-${width}-${power}.png`,
+            })
+        }
+      }
+      // The reservation is a minimum, so unexpectedly large readings remain
+      // readable instead of being clipped to the usual four-digit budget.
+      const reservedWidth = (await measure()).badgeWidth
+      power = 123456789
+      await page.clock.fastForward(1100)
+      await expect(badge).toHaveText('123456789 W')
+      expect((await measure()).badgeWidth).toBeGreaterThan(reservedWidth)
+      expect(
+        await badge.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+      ).toBe(true)
+    })
+  }
+
   for (const count of [1, 2, 3, 4, 5, 6]) {
     test(`${mode} Hardware lays out ${count} cards using available section width`, async ({
       page,

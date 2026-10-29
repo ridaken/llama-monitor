@@ -613,14 +613,11 @@ export function Monitor({
                     key={device.index}
                     className="monitor-gpu rounded-xl border border-border/70 bg-background/30 p-4"
                   >
-                    <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="monitor-gpu-header mb-4 flex items-start justify-between gap-3">
                       <strong>
                         GPU {device.index} · {device.name || 'GPU'}
                       </strong>
-                      <Badge
-                        variant="secondary"
-                        className="shrink-0 whitespace-nowrap"
-                      >
+                      <Badge variant="secondary" className="monitor-gpu-power">
                         {fmt(device.power, 0)} W
                       </Badge>
                     </div>

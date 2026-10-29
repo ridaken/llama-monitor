@@ -746,6 +746,19 @@ button:disabled {
       max-content
     );
 }
+.monitor-gpu-header > strong {
+  min-width: 0;
+  flex: 1;
+}
+.monitor-gpu-power {
+  /* Reserve four digits, a space, and W plus the badge's padding and border.
+     Live wattage must not change the space available to the device name. */
+  min-width: calc(7ch + 1.25rem + 2px);
+  flex-shrink: 0;
+  justify-content: flex-end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 /* Use the section's content width so neighboring dashboard tiles can reduce
    the column count without requiring a viewport resize. */
 @container hardware (min-width: 656px) {
