@@ -35,7 +35,7 @@ def test_seeded_automation_is_inert_and_test_owned_models_stop(isolated, monkeyp
     monkeypatch.setattr(app_module.ServerManager, "adopt", lambda _: pytest.fail("must not adopt"))
     monkeypatch.setattr(app_module.GamingCoordinator, "start", lambda _: pytest.fail("must not automate"))
     stopped = []
-    monkeypatch.setattr(app_module.ServerManager, "stop", lambda _: stopped.append(True))
+    monkeypatch.setattr(app_module.ServerManager, "stop", lambda _, **kwargs: stopped.append(True))
     with TestClient(app_module.build_app(isolated), client=("127.0.0.1", 50000)) as client:
         assert client.get("/api/launcher/state").json()["test_mode"]
         assert client.get("/api/gaming/state").json()["phase"] == "normal"
@@ -96,7 +96,7 @@ def test_launch_and_restart_history_have_model_without_stats(isolated, monkeypat
     monkeypatch.setattr(make_follower, "start", lambda _: None)
     launches = []
 
-    def fake_launch(manager, config):
+    def fake_launch(manager, config, **kwargs):
         run_id = f"run-{len(launches)}"
         launches.append(run_id)
         manager.current = config

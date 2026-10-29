@@ -10,6 +10,18 @@ import pytest
 import cli
 
 
+def test_retained_log_cli_routes(invoke):
+    code, output, calls = invoke(["logs", "--runs", "--limit", "10"], lambda _: {"items": [], "next_cursor": None})
+    assert code == 0 and output["data"]["items"] == []
+    assert calls[0].url.path == "/api/launcher/log-runs" and calls[0].url.params["limit"] == "10"
+    code, output, calls = invoke(["logs", "--run", "a" * 32, "--tail", "1"],
+        lambda _: {"available": True, "content": "first\nlast\n"})
+    assert code == 0 and output["data"]["content"] == "last"
+    assert calls[0].url.params["run_id"] == "a" * 32
+    code, _, calls = invoke(["logs", "--runs", "--limit", "0"], lambda _: pytest.fail("no HTTP"))
+    assert code == 2 and not calls
+
+
 @pytest.fixture
 def invoke(monkeypatch, capsys):
     real_client = httpx.Client

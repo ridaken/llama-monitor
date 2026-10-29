@@ -131,6 +131,7 @@ def main():
             assert cli("configs", "list")["configs"][0] == config
             assert cli("configs", "show", "smoke") == config
             assert cli("launch", "--config", "smoke", "--wait", "--timeout", "30")["readiness"]["ready"]
+            run_id = cli("status")["launcher"]["status"]["run_id"]
             # Real Linux procfs identity must tolerate wall-clock shifts without
             # changing the host clock or the backend's persisted state.
             assert exec_python("import processes, store; r=store.get_running()['identity']; "
@@ -182,6 +183,8 @@ def main():
             assert placement["total_layers"] == 2 and placement["output_device"] == "CPU"
             assert placement["devices"] == [{"label": "CPU", "layers": 2}]
             assert cli("logs", "--tail", "2")["available"]
+            assert "waiting for new tasks" not in cli("logs", "--tail", "1000")["content"]
+            assert cli("logs", "--runs")["items"][0]["run_id"] == run_id
             assert cli("gaming", "status")["supported"] is False
             assert cli("startup", "status")["supported"] is False
             eventually(lambda: cli("history", "list")["items"])
@@ -228,7 +231,11 @@ def main():
             request("/api/launcher/settings", {"llama_server_path": "/tmp/llama-server-crash"})
             cli("launch", "--config", "smoke")
             eventually(lambda: cli("status")["launcher"]["status"]["state"] == "exited")
-            assert cli("logs")["content"] == "early loader fault"
+            assert "early loader fault" in cli("logs")["content"]
+            assert "code 7" in cli("logs")["content"]
+            past = cli("logs", "--runs")["items"]
+            assert any(item["stop_reason"] == "container_shutdown" for item in past)
+            assert cli("logs", "--run", run_id)["available"]
             cli("doctor", expected=1)
             cli("wait", "--ready", expected=1)
             request("/api/launcher/settings", {"llama_server_path": bundled})

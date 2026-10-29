@@ -361,7 +361,7 @@ def test_lifecycle_actions_blocked_and_cancel_all_releases_failed_state(rig):
 def test_snapshot_persisted_before_any_stop(rig, monkeypatch):
     c, p, *_ = rig
     original_stop = p.stop
-    def stop():
+    def stop(*args):
         assert store.load_state()["gaming"]["transition"]["servers"][0]["original"]["argv"]
         original_stop()
     monkeypatch.setattr(p, "stop", stop)

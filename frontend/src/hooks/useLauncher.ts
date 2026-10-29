@@ -8,6 +8,7 @@ import type {
   FlagResponse,
   KnownFlag,
   LauncherState,
+  LogRun,
   Stats,
 } from '@/types'
 
@@ -95,6 +96,30 @@ export function useLauncher() {
   const [consoleText, setConsoleText] = useState('')
   const [consolePath, setConsolePath] = useState('')
   const [consoleOffset, setConsoleOffset] = useState(0)
+  const [consoleRuns, setConsoleRuns] = useState<LogRun[]>([])
+  const [consoleRun, setConsoleRun] = useState('')
+  const [consoleRunCursor, setConsoleRunCursor] = useState<string | null>(null)
+  const [consoleLogError, setConsoleLogError] = useState('')
+  const consoleCursorRef = useRef('')
+  const loadConsoleRuns = useCallback(async (cursor = '', refresh = false) => {
+    try {
+      const result = await api<{ items: LogRun[]; next_cursor: string | null }>(
+        `/api/launcher/log-runs?limit=50&cursor=${encodeURIComponent(cursor)}`,
+      )
+      setConsoleRuns((previous) => {
+        if (cursor) return [...previous, ...result.items]
+        if (!refresh) return result.items
+        const ids = new Set(result.items.map((run) => run.run_id))
+        return [
+          ...result.items,
+          ...previous.filter((run) => !ids.has(run.run_id)),
+        ]
+      })
+      if (!refresh) setConsoleRunCursor(result.next_cursor)
+    } catch (error) {
+      setConsoleLogError((error as Error).message)
+    }
+  }, [])
   const consoleSourceRef = useRef('')
   const [diagnostics, setDiagnostics] = useState<DoctorReport | null>(null)
   const [diagnosticsError, setDiagnosticsError] = useState('')
@@ -556,11 +581,14 @@ export function useLauncher() {
     let live = true
     let pending = false
     consoleOffsetRef.current = 0
+    consoleCursorRef.current = ''
     consoleSourceRef.current = ''
     consoleHasRef.current = false
     consoleStickRef.current = true
     setConsoleText('')
     setConsoleOffset(0)
+    setConsoleLogError('')
+    void loadConsoleRuns()
     const poll = async () => {
       if (pending) return
       pending = true
@@ -571,18 +599,35 @@ export function useLauncher() {
           offset: number
           path: string
           source?: string
+          cursor?: string
+          reset?: boolean
+          gap?: boolean
+          error?: string | null
         }>(
-          `/api/launcher/console?offset=${consoleOffsetRef.current}&source=${consoleSourceRef.current}`,
+          `/api/launcher/console?offset=${consoleOffsetRef.current}&source=${consoleSourceRef.current}&run_id=${encodeURIComponent(consoleRun)}&cursor=${encodeURIComponent(consoleCursorRef.current)}`,
         )
         if (!live) return
         setConsolePath(result.path || '')
+        setConsoleLogError(
+          result.error ||
+            (result.gap
+              ? 'Older diagnostic output is no longer retained.'
+              : ''),
+        )
         if (result.content) {
           const clean = result.content.replace(/\x1b\[[0-9;]*m/g, '')
           const replace =
             !consoleHasRef.current ||
+            result.reset ||
             result.offset < consoleOffsetRef.current ||
             (result.source || '') !== consoleSourceRef.current
-          setConsoleText((previous) => (replace ? clean : previous + clean))
+          setConsoleText((previous) => {
+            const text = replace ? clean : previous + clean
+            return text.length > 512 * 1024
+              ? '[Earlier output omitted from display]\n' +
+                  text.slice(-(512 * 1024))
+              : text
+          })
           consoleHasRef.current = true
         } else if (!consoleHasRef.current)
           setConsoleText(
@@ -591,6 +636,7 @@ export function useLauncher() {
               : '(no log yet — launch a server from Monitor)',
           )
         consoleOffsetRef.current = result.offset
+        consoleCursorRef.current = result.cursor || ''
         consoleSourceRef.current = result.source || ''
         setConsoleOffset(result.offset)
         requestAnimationFrame(() => {
@@ -606,11 +652,13 @@ export function useLauncher() {
     }
     poll()
     const timer = setInterval(poll, 1000)
+    const runsTimer = setInterval(() => void loadConsoleRuns('', true), 10000)
     return () => {
       live = false
       clearInterval(timer)
+      clearInterval(runsTimer)
     }
-  }, [modal])
+  }, [modal, consoleRun, loadConsoleRuns])
 
   const status = state?.status.state || 'stopped'
   const gamingBlocked = !!state?.gaming?.blocked
@@ -675,6 +723,12 @@ export function useLauncher() {
     openBrowse,
     chooseFile,
     consolePath,
+    consoleRuns,
+    consoleRun,
+    setConsoleRun,
+    consoleRunCursor,
+    loadConsoleRuns,
+    consoleLogError,
     consoleOffset,
     consoleText,
     consolePreRef,
