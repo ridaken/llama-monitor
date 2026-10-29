@@ -102,7 +102,9 @@ for (const mode of ['Fit', 'Comfortable']) {
       // Locate this font and density's actual one/two-line boundary while
       // retaining four columns, then exercise both sides through real polling.
       let narrow = 1330
-      let wide = 2400
+      let wide = await panel.evaluate((el) =>
+        Math.floor(innerWidth - el.getBoundingClientRect().left - 32),
+      )
       await setWidth(narrow)
       expect((await measure()).lines).toBeGreaterThan(1)
       await setWidth(wide)
