@@ -51,7 +51,7 @@ def test_build_argv_excludes_disabled_flags():
     assert "--no-mmap" not in argv                # disabled -> not launched
     # Managed flags still appended last so they win.
     assert "--metrics" in argv
-    assert argv[-2:] == ["--log-file", store.MANAGED_LOG]
+    assert argv[-2:] == ["--log-file", os.devnull]
 
 
 def test_build_argv_injects_managed_flags_last():
@@ -64,7 +64,7 @@ def test_build_argv_injects_managed_flags_last():
     assert "-c" in argv and "86000" in argv
     # llama-monitor owns these three and appends them last so they win.
     assert "--metrics" in argv
-    assert argv[-2:] == ["--log-file", store.MANAGED_LOG]
+    assert argv[-2:] == ["--log-file", os.devnull]
     p = argv.index("--port")
     assert argv[p + 1] == "8001"
 
@@ -225,6 +225,8 @@ def fake_popen(monkeypatch):
         return launcher.same_identity(record, current)
 
     monkeypatch.setattr(launcher.subprocess, "Popen", _popen)
+    monkeypatch.setattr(launcher.log_capture, "launch", lambda argv, cwd, run_id, name: _popen(
+        argv, cwd=cwd, creationflags=launcher._DETACH_FLAGS, **launcher._DETACH_KW))
     # Help parsing has its own tests; subprocess.run would also use fake Popen
     # and replace the captured model process while preparing a restart.
     monkeypatch.setattr(launcher.flags_mod, "get_server_flags",
@@ -372,9 +374,10 @@ def test_real_child_startup_output_survives_early_exit(good_settings, monkeypatc
     if mgr._proc is not None:
         mgr._proc.wait(timeout=10)
     assert mgr.status()["exit_code"] == 7
-    with open(launcher.startup_log_path(), encoding="utf-8") as output:
-        assert output.read().splitlines() == ["startup stdout", "early loader error"]
-    assert os.path.getsize(store.MANAGED_LOG) == 0
+    content = launcher.managed_logs.console(mgr.run_id)["content"]
+    assert "startup stdout" in content and "early loader error" in content
+    assert "code 7" in content
+    assert not os.path.exists(store.MANAGED_LOG)
 
 
 def test_launch_persists_running_record_and_stop_clears_it(good_settings, fake_popen):

@@ -11,7 +11,29 @@ from fastapi.testclient import TestClient
 import app as app_module
 import launcher
 import store
+import managed_logs
 from history import HistoryDB
+
+
+def test_filtered_console_lists_retained_runs_and_validates_cursors(client):
+    capture = managed_logs.Writer("a" * 32, "Previous model")
+    capture.feed("server is listening")
+    capture.feed("warning: useful diagnostic")
+    capture.finish(7, "unexpected_exit")
+    runs = client.get("/api/launcher/log-runs").json()
+    assert runs["items"][0]["exit_code"] == 7
+    first = client.get("/api/launcher/console", params={"run_id": capture.run_id}).json()
+    assert "useful diagnostic" in first["content"]
+    assert first["source"] == "filtered"
+    second = client.get("/api/launcher/console", params={"run_id": capture.run_id, "cursor": first["cursor"]}).json()
+    assert second["content"] == "" and second["offset"] == first["offset"]
+    assert client.get("/api/launcher/console", params={"run_id": "../state.json"}).status_code == 400
+    assert client.get("/api/launcher/console", params={"run_id": capture.run_id, "cursor": "bad"}).status_code == 400
+    assert client.get("/api/launcher/log-runs", params={"limit": 0}).status_code == 400
+    newer = managed_logs.Writer("b" * 32, "Next model")
+    newer.event("New run output")
+    default = client.get("/api/launcher/console", params={"cursor": first["cursor"]}).json()
+    assert default["reset"] and "New run output" in default["content"]
 
 
 @pytest.fixture

@@ -264,7 +264,7 @@ class GamingCoordinator:
                     # Also catches a process spawned just before a backend crash
                     # persisted its new identity into the transition record.
                     if entry["id"] == "primary":
-                        self.manager.stop()
+                        self.manager.stop("gaming_suspension")
                     else:
                         live = self.auxiliary.snapshot(settings["auxiliary"]) if settings["auxiliary"] else entry.get("live")
                         if live:
@@ -425,7 +425,7 @@ class GamingCoordinator:
     def _load_failed(self, entry, message):
         try:
             if entry["id"] == "primary":
-                self.manager.stop()
+                self.manager.stop("failed_load_cleanup")
             elif entry.get("live") or getattr(self.auxiliary, "proc", None):
                 self.auxiliary.stop(entry.get("live"))
         except Exception:

@@ -166,6 +166,27 @@ or model compatibility. CLI `doctor` converts unhealthy reports to exit 1.
 
 ### Console
 
+`GET /api/launcher/log-runs` lists retained managed diagnostics, newest first.
+Query `limit` defaults to 50 (1–200), and `cursor` is the previous `next_cursor`.
+The result is `{items, next_cursor}`; each item has `run_id`, `config_name`,
+`started_at`, nullable `ended_at`, `state`, nullable `stop_reason` and `exit_code`,
+`gap`, `startup_truncated`, and nullable `logging_error`. Invalid/expired listing
+cursors return HTTP 400. An unclean interruption has unknown exit time/code.
+
+For filtered managed runs, `GET /api/launcher/console` additionally accepts
+`run_id` and `cursor`. Omit `run_id` to follow the active/latest managed run;
+explicit IDs select retained runs. IDs are validated identifiers, never paths.
+Responses preserve the existing fields and add `run_id`, opaque `cursor`, `reset`,
+`gap`, nullable `error`, and a `run` lifecycle summary. `source` is `filtered`.
+Pass the returned cursor on subsequent reads; on `reset`, replace displayed text.
+Positions span immutable segments and survive rotation. Eviction of unread bytes
+sets `reset`/`gap`; changing the default active run also resets the stream.
+Reads are bounded to 256 KiB and return whole records, including final crash
+output. Invalid IDs/cursors return 400; an evicted run returns `available: false`
+with `reset: true`. Capture errors also appear as `status.logging_error`.
+
+The existing file-based contract below applies to external and legacy runs:
+
 `GET /api/launcher/console` accepts query `offset` (integer byte position, default
 0) and `source` (previous response's source, default empty). It returns
 `{available, content, offset, size, path, source?}`, optionally `error`. File

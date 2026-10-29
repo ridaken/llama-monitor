@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Test Apollo authentication and isolated Windows installation
-        run: python -m pytest -q tests/test_apollo.py tests/test_apollo_build.py tests/test_cli.py tests/test_proxy.py tests/test_verification.py tests/test_test_mode.py tests/test_diagnostics.py tests/test_launcher.py
+        run: python -m pytest -q tests/test_apollo.py tests/test_apollo_build.py tests/test_cli.py tests/test_proxy.py tests/test_verification.py tests/test_test_mode.py tests/test_diagnostics.py tests/test_launcher.py tests/test_managed_logs.py
       - name: Verify native proxy with the real CLI and isolated state
         run: python tests/native_proxy_smoke.py
 

@@ -40,7 +40,7 @@ def test_container_starts_without_model_and_clears_stale_pid(container, monkeypa
     monkeypatch.setattr(launcher.ServerManager, "adopt", lambda self: pytest.fail("must not adopt"))
     monkeypatch.setattr(app_module.GamingCoordinator, "start", lambda self: pytest.fail("no Windows startup"))
     stopped = []
-    monkeypatch.setattr(launcher.ServerManager, "stop", lambda self: stopped.append(True))
+    monkeypatch.setattr(launcher.ServerManager, "stop", lambda self, reason=None: stopped.append(reason))
     with TestClient(app_module.build_app(container)) as client:
         assert client.get("/api/health").json() == {"status": "ok"}
         state = client.get("/api/launcher/state").json()
@@ -48,7 +48,7 @@ def test_container_starts_without_model_and_clears_stale_pid(container, monkeypa
         assert state["settings"]["models_dir"] == "/models"
         assert state["runtime"] == {"containerized": True, "models_dir": "/models", "managed_port": 8001}
         assert store.get_running() is None
-    assert stopped == [True]
+    assert stopped == ["container_shutdown"]
 
 
 @pytest.mark.parametrize("path", ["/api/startup/install", "/api/startup/remove",

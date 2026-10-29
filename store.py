@@ -37,7 +37,7 @@ from typing import Optional
 HOME_DIR = os.path.abspath(os.path.expanduser(os.environ.get(
     "LLAMA_MONITOR_DATA_DIR", os.path.join(os.path.expanduser("~"), ".llama-monitor"))))
 STATE_PATH = os.path.join(HOME_DIR, "state.json")
-# The log file llama-monitor tells launched servers to write (and then tails).
+# Legacy managed path / logical history cursor. New capture lives in logs/.
 MANAGED_LOG = os.path.join(HOME_DIR, "llama-server.log")
 PROMPTS_DIR = os.path.join(HOME_DIR, "prompts")
 
