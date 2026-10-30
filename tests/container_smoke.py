@@ -209,6 +209,13 @@ def main():
             # Opt-in startup must work without a browser or a manual launch.
             request("/api/configs/default", {"name": "smoke"})
             request("/api/launcher/settings", {"autostart_default_model": True})
+            # Old verbose logs must not hold the dashboard behind model startup.
+            exec_python("from pathlib import Path\n"
+                        "for suffix in ('', '.startup'):\n"
+                        "    with Path('/data/llama-server.log' + suffix).open('wb') as stream:\n"
+                        "        stream.write(b'startup warning from legacy log\\n')\n"
+                        "        stream.seek(128 * 1024 * 1024)\n"
+                        "        stream.write(b'\\nrecent legacy loader error\\n')\n")
             run("up", "--force-recreate", "--wait", "--wait-timeout", "60", "-d")
             cli("wait", "--backend", "--timeout", "30")
             startup_state = request("/api/launcher/state")
@@ -216,6 +223,12 @@ def main():
             assert cli("wait", "--ready", "--timeout", "30")["ready"]
             auto_run = cli("status")["launcher"]["status"]["run_id"]
             assert auto_run and auto_run != restarted
+            imported = next(row for row in cli("logs", "--runs")["items"]
+                            if row["stop_reason"] == "legacy_import")
+            assert imported["gap"] and imported["startup_truncated"]
+            imported_content = cli("logs", "--run", imported["run_id"], "--tail", "1000")["content"]
+            assert "startup warning from legacy log" in imported_content
+            assert "recent legacy loader error" in imported_content and "omitted middle" in imported_content
             assert cli("status")["launcher"]["settings"]["autostart_default_model"] is True
             assert cli("stop")["status"]["state"] == "stopped"
             # Allow several coordinator/poll intervals to expose accidental retries.
