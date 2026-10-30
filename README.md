@@ -254,7 +254,10 @@ early loader errors even without a final newline. Filtered diagnostics survive
 backend restarts and subsequent launches within the retention budget. Console
 and CLI expose the current and previous runs. Legacy launched servers retain their
 existing `llama-server.log` / `.startup` behavior until the next launch, when those
-files are imported through the filter and removed.
+files are imported through the filter and removed. For large legacy files, only
+the first and last 1 MiB of each file are imported, with an explicit gap marker.
+This keeps automatic model startup from replaying entire historical debug logs
+before the dashboard becomes available.
 
 On Linux, exit `-11` means the process received SIGSEGV; it does **not** identify
 the underlying cause. In a real Windows Docker/WSL failure, even `--list-devices`

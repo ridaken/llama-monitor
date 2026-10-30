@@ -136,6 +136,63 @@ def test_legacy_import_keeps_unique_startup_error_and_removes_raw_files(isolated
     assert len(logs.list_runs()["items"]) == 1
 
 
+@pytest.mark.parametrize("boundary", [b"x", b"\n"])
+def test_large_legacy_import_bounds_reads_and_keeps_startup_and_tail(isolated, monkeypatch, boundary):
+    source = Path(store.MANAGED_LOG)
+    size = 128 * 1024 * 1024
+    tail = b"\nrecent loader error\n"
+    with source.open("wb") as stream:
+        stream.write(b"print_info: n_layer = 42\nserver is listening\nstartup warning\n")
+        stream.seek(size - logs.LEGACY_WINDOW - 1)
+        stream.write(boundary + b"partial tail error\n")
+        stream.seek(size - len(tail))
+        stream.write(tail)
+
+    # Fail if migration scans the omitted middle, including an oversized line.
+    original = Path.open
+    read_bytes = 0
+
+    class BoundedReader:
+        def __enter__(self):
+            self.stream = original(source, "rb")
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def seek(self, offset):
+            return self.stream.seek(offset)
+
+        def read(self, length):
+            nonlocal read_bytes
+            assert 0 <= length <= logs.LEGACY_WINDOW
+            result = self.stream.read(length)
+            read_bytes += len(result)
+            assert read_bytes <= 2 * logs.LEGACY_WINDOW + 1
+            return result
+
+    def guarded_open(path, *args, **kwargs):
+        if path == source and args == ("rb",):
+            return BoundedReader()
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", guarded_open)
+    logs.import_legacy()
+    selected = logs.latest()
+    result = logs.console(selected)
+    assert "startup warning" in result["content"] and "recent loader error" in result["content"]
+    assert ("partial tail error" in result["content"]) == (boundary == b"\n")
+    assert "omitted middle" in result["content"]
+    record = logs.load(selected)
+    assert record["gap"] and record["startup_truncated"]
+    assert record["metadata"]["placement"]["blocks"][0]["total"] == 42
+    assert record["stop_reason"] == "legacy_import"
+    assert not source.exists()
+
+
 def test_storage_failure_has_reserved_error_channel(isolated, monkeypatch):
     capture = writer()
     original = logs.atomic

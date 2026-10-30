@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 from collections import deque
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ MAX_LINE = 64 * 1024
 STARTUP_LIMIT = 1024 * 1024
 METADATA_LIMIT = 512 * 1024
 READ_LIMIT = 256 * 1024
+LEGACY_WINDOW = 1024 * 1024
 _ID = re.compile(r"[a-f0-9]{32}\Z")
 _IMPORTANT = re.compile(r"processing task|stop processing|print_timing|draft acceptance|mean acceptance|"
                         r"cancel(?:led|ing)? task|request.*(?:failed|completed)", re.I)
@@ -445,6 +447,7 @@ def reconcile():
 
 
 def import_legacy():
+    """Keep startup and recent diagnostics without replaying unbounded raw logs."""
     paths = [Path(store.MANAGED_LOG), Path(store.MANAGED_LOG + ".startup")]
     existing = [p for p in paths if p.is_file() and not p.is_symlink() and p.stat().st_size]
     if not existing:
@@ -454,13 +457,28 @@ def import_legacy():
     for source in existing:
         writer.event(f"Importing {source.name}.")
         with source.open("rb") as stream:
-            for raw, truncated in bounded_lines(stream):
-                signature = hashlib.sha256(raw).digest()
-                if signature not in recent:
-                    writer.feed(raw.decode("utf-8", "replace"))
-                    recent.append(signature)
-                if truncated:
-                    writer.event("Oversized legacy log line truncated.")
+            size = os.fstat(stream.fileno()).st_size
+            windows = [(0, size)] if size <= 2 * LEGACY_WINDOW else [
+                (0, LEGACY_WINDOW), (size - LEGACY_WINDOW, LEGACY_WINDOW)]
+            for offset, length in windows:
+                if offset:
+                    writer.record.update(gap=True, startup_truncated=True)
+                    writer.event(f"Legacy log truncated: omitted middle of {source.name}; "
+                                 "retaining startup and recent diagnostics.")
+                    stream.seek(offset - 1)
+                    boundary = stream.read(1) == b"\n"
+                else:
+                    boundary = True
+                chunk = stream.read(length)
+                if not boundary:
+                    chunk = chunk.partition(b"\n")[2]  # discard a partial tail record
+                for raw, truncated in bounded_lines(io.BytesIO(chunk)):
+                    signature = hashlib.sha256(raw).digest()
+                    if signature not in recent:
+                        writer.feed(raw.decode("utf-8", "replace"))
+                        recent.append(signature)
+                    if truncated:
+                        writer.event("Oversized legacy log line truncated.")
     writer.finish(None, "legacy_import")
     for path in paths:
         path.unlink(missing_ok=True)
