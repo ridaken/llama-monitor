@@ -114,6 +114,16 @@ container paths such as `/models/qwen.gguf`, including paths in flags for draft
 models or adapters. Windows `.exe` files and arbitrary host paths cannot be used
 inside this Linux container.
 
+For models stored in WSL, use a directory in your distribution's Linux filesystem,
+such as `/home/tom/models`. Enable Docker Desktop's WSL integration for that
+distribution, run Compose from its WSL shell, and set `MODELS_DIR` in `.env` to
+the full Linux directory. Apply the mount with `docker compose up -d`, then browse
+`/models` in llama-monitor. For example, `/home/tom/models/controller/model.gguf`
+becomes `/models/controller/model.gguf`; use the same mapping for a `--mmproj`
+flag's value. `\\wsl.localhost\Ubuntu\home\tom` is a Windows File Explorer address,
+not a path inside Docker. The picker's **Location** field accepts pasted folder
+or file paths, and **Mounted models (/models)** returns to the mounted folder.
+
 The dashboard is also available at `http://<host-LAN-IP>:8500`, and the managed
 server's OpenAI-compatible API at `http://<host-LAN-IP>:8001/v1`. After enabling
 **Manage → Inference proxy**, clients can use `http://<host-LAN-IP>:8501/v1`.

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ntpath
 import os
 import hmac
 import ipaddress
@@ -761,7 +762,20 @@ def build_app(args) -> FastAPI:
         """
         exts = [e.strip().lower() for e in ext.split(",") if e.strip()]
 
+        path = path.strip()
+        if len(path) >= 2 and path[0] == path[-1] and path[0] in "\"'":
+            path = path[1:-1]
+        if runtime.containerized() and (ntpath.splitdrive(path)[0] or path.startswith("\\")):
+            return JSONResponse({"error": (
+                "This is a Windows or WSL File Explorer path. Docker can only browse "
+                "folders mounted inside the container. Open /models, or set MODELS_DIR "
+                "in .env to your models folder and recreate the container with docker compose up -d. "
+                "For WSL storage, run Compose from that WSL distribution using its Linux folder path."
+            )}, status_code=400)
+
         # Empty path -> the drive list on Windows, home dir elsewhere.
+        if not path and runtime.containerized():
+            path = "/models"
         if not path:
             if os.name == "nt":
                 drives = [f"{d}:\\" for d in string.ascii_uppercase
@@ -770,6 +784,8 @@ def build_app(args) -> FastAPI:
             path = os.path.expanduser("~")
 
         path = os.path.abspath(path)
+        if os.path.isfile(path):
+            path = os.path.dirname(path)
         try:
             entries = os.listdir(path)
         except Exception as e:

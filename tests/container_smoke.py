@@ -115,6 +115,14 @@ def main():
             bundled = state["settings"]["llama_server_path"]
             assert request("/api/launcher/flags")["source"] == "help"
             assert "/models/smoke.gguf" in request("/api/browse?path=/models&ext=.gguf")["files"]
+            assert request("/api/browse?ext=.gguf")["path"] == "/models"
+            assert request("/api/browse?path=/models/smoke.gguf")["path"] == "/models"
+            try:
+                request("/api/browse?path=C%3A%2FModels")
+                raise AssertionError("Container accepted a Windows host path")
+            except urllib.error.HTTPError as error:
+                assert error.code == 400
+                assert "MODELS_DIR" in json.load(error)["error"]
             with urllib.request.urlopen(f"http://127.0.0.1:{env['DASHBOARD_PORT']}/") as response:
                 html = response.read().decode()
             import re

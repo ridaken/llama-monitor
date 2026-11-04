@@ -645,6 +645,8 @@ export function LauncherDialogs({
     deleteConfig,
     browse,
     browseLoading,
+    browsePath,
+    setBrowsePath,
     goBrowse,
     chooseFile,
     consolePath,
@@ -782,10 +784,57 @@ export function LauncherDialogs({
                 ? 'Select a model (.gguf)'
                 : 'Select llama-server executable'}
             </DialogTitle>
-            <DialogDescription className="mono break-all">
-              {browse?.path || 'This PC'}
+            <DialogDescription>
+              {launcher.state?.runtime?.containerized
+                ? 'Browse files inside Docker. Your mounted models folder is /models; Windows and WSL File Explorer paths are not available here.'
+                : 'Enter a folder or file path on the computer running llama-monitor.'}
             </DialogDescription>
           </DialogHeader>
+          <form
+            className="space-y-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              goBrowse(
+                browsePath,
+                modal === 'browse-model' ? 'model' : 'binary',
+              )
+            }}
+          >
+            <Label htmlFor="lx-browse-path">Location</Label>
+            <div className="flex gap-2">
+              <Input
+                id="lx-browse-path"
+                className="mono min-w-0"
+                value={browsePath}
+                onChange={(event) => setBrowsePath(event.target.value)}
+                placeholder={
+                  launcher.state?.runtime?.containerized
+                    ? '/models'
+                    : 'Folder or file path'
+                }
+                spellCheck={false}
+              />
+              <Button type="submit" disabled={browseLoading}>
+                Go
+              </Button>
+            </div>
+            {launcher.state?.runtime?.containerized && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={browseLoading}
+                onClick={() =>
+                  goBrowse(
+                    '/models',
+                    modal === 'browse-model' ? 'model' : 'binary',
+                  )
+                }
+              >
+                <FolderOpen />
+                Mounted models (/models)
+              </Button>
+            )}
+          </form>
           <div
             id="lx-browse-list"
             className="max-h-[55vh] overflow-auto rounded-xl border border-border"
