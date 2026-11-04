@@ -120,6 +120,7 @@ test('console replaces startup fallback when the managed log appears at a larger
   })
   await page.goto('/')
   await page.locator('#lx-console').click()
+  await page.getByRole('radio', { name: 'Traces', exact: true }).check()
   await expect(page.locator('#console-out')).toContainText('early output')
   await expect(page.locator('#console-out')).toContainText(
     'structured server log',

@@ -330,8 +330,21 @@ metadata. Old completed runs are evicted first, then older active-run segments.
 A compact current placement/allocation snapshot survives segment eviction and
 backend restarts. Startup capture and individual lines are bounded; truncation,
 retention gaps, and capture failures are reported explicitly. The Console keeps
-only the latest 512 KiB of displayed text. Request/prompt history in SQLite and
-prompt files have their existing retention settings and are outside this budget.
+only the latest 512 KiB of output in its display buffer, including hidden records.
+Request/prompt history in SQLite and prompt files have their existing retention
+settings and are outside this budget.
+
+The Console opens with **Events**, showing lifecycle and request activity plus
+warnings and errors. **Errors** shows warnings, errors and abnormal exits;
+**Traces** shows all retained output, including informational and model-loading
+details. Switching levels filters the buffered output immediately and does not
+change capture, stored logs, history or CLI output. Previously discarded traces
+remain unavailable. The choice stays selected when switching model runs and
+returns to Events when reopening the dialog.
+
+`GET /api/launcher/console` also returns an additive `entries` array with `text`
+and optional `type`, `level` and `continuation` metadata for display filtering.
+Its existing `content`, byte offsets and cursors retain their behavior.
 
 The detached supervisor survives native backend exit. It records actual server
 exit codes and reasons for requested stops, replacement/restart, gaming suspension,
@@ -348,8 +361,8 @@ python cli.py logs --run RUN_ID --tail 100 --json
 python cli.py logs --runs --cursor NEXT_CURSOR --limit 50 --json
 ```
 
-Filtering starts on the next managed launch; it does not interrupt an already
-running model. External watched logs and registered embedding processes are not
+Storage filtering starts on the next managed launch; it does not interrupt an
+already running model. External watched logs and registered embedding processes are not
 rewritten or rotated by this feature. Native backend logs and Docker container
 logs retain their separate rotation policies.
 

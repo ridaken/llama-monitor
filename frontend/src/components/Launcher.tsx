@@ -656,6 +656,8 @@ export function LauncherDialogs({
     consoleLogError,
     consoleOffset,
     consoleText,
+    consoleFilter,
+    setConsoleFilter,
     consolePreRef,
     consoleStickRef,
   } = launcher
@@ -898,6 +900,33 @@ export function LauncherDialogs({
               </Button>
             )}
           </div>
+          <fieldset className="space-y-1">
+            <legend className="mb-1 text-sm">Output level</legend>
+            <div className="inline-flex overflow-hidden rounded-md border border-border">
+              {(['traces', 'events', 'errors'] as const).map((filter) => (
+                <label
+                  key={filter}
+                  className="relative cursor-pointer border-border not-last:border-r"
+                >
+                  <input
+                    type="radio"
+                    name="console-filter"
+                    value={filter}
+                    checked={consoleFilter === filter}
+                    onChange={() => setConsoleFilter(filter)}
+                    className="peer absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                  <span className="block px-3 py-1.5 text-sm capitalize peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ring">
+                    {filter[0].toUpperCase() + filter.slice(1)}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Filters the display only. Traces shows all retained output. Events
+              includes warnings and errors; Errors includes warnings.
+            </p>
+          </fieldset>
           {selectedLogRun && (
             <p className="break-words text-sm text-muted-foreground">
               {selectedLogRun.config_name || 'Unnamed model'} ·{' '}

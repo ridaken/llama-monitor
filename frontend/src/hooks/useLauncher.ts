@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, post } from '@/api'
 import { basename } from '@/lib/utils'
+import {
+  appendConsoleEntries,
+  consoleOutput,
+  emptyConsoleBuffer,
+  type ConsoleFilter,
+} from '@/lib/console'
 import type {
   Config,
+  ConsoleEntry,
   DoctorReport,
   Flag,
   FlagResponse,
@@ -93,7 +100,13 @@ export function useLauncher() {
   const [flagsCollapsed, setFlagsCollapsed] = useState(true)
   const [browse, setBrowse] = useState<Browse | null>(null)
   const [browseLoading, setBrowseLoading] = useState(false)
-  const [consoleText, setConsoleText] = useState('')
+  const [consoleBuffer, setConsoleBuffer] = useState(emptyConsoleBuffer)
+  const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('events')
+  const [consoleMessage, setConsoleMessage] = useState('')
+  const consoleText = useMemo(
+    () => consoleOutput(consoleBuffer, consoleFilter) || consoleMessage,
+    [consoleBuffer, consoleFilter, consoleMessage],
+  )
   const [consolePath, setConsolePath] = useState('')
   const [consoleOffset, setConsoleOffset] = useState(0)
   const [consoleRuns, setConsoleRuns] = useState<LogRun[]>([])
@@ -121,6 +134,8 @@ export function useLauncher() {
     }
   }, [])
   const consoleSourceRef = useRef('')
+  const consolePathRef = useRef('')
+  const consoleRunRef = useRef('')
   const [diagnostics, setDiagnostics] = useState<DoctorReport | null>(null)
   const [diagnosticsError, setDiagnosticsError] = useState('')
   const [diagnosing, setDiagnosing] = useState(false)
@@ -577,15 +592,31 @@ export function useLauncher() {
   }
 
   useEffect(() => {
+    if (modal === 'console') setConsoleFilter('events')
+  }, [modal])
+
+  useEffect(() => {
+    if (modal !== 'console') return
+    const frame = requestAnimationFrame(() => {
+      if (consoleStickRef.current && consolePreRef.current)
+        consolePreRef.current.scrollTop = consolePreRef.current.scrollHeight
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [modal, consoleText])
+
+  useEffect(() => {
     if (modal !== 'console') return
     let live = true
     let pending = false
     consoleOffsetRef.current = 0
     consoleCursorRef.current = ''
     consoleSourceRef.current = ''
+    consolePathRef.current = ''
+    consoleRunRef.current = ''
     consoleHasRef.current = false
     consoleStickRef.current = true
-    setConsoleText('')
+    setConsoleBuffer(emptyConsoleBuffer())
+    setConsoleMessage('')
     setConsoleOffset(0)
     setConsoleLogError('')
     void loadConsoleRuns()
@@ -596,9 +627,11 @@ export function useLauncher() {
         const result = await api<{
           available: boolean
           content: string
+          entries?: ConsoleEntry[]
           offset: number
           path: string
           source?: string
+          run_id?: string
           cursor?: string
           reset?: boolean
           gap?: boolean
@@ -614,23 +647,30 @@ export function useLauncher() {
               ? 'Older diagnostic output is no longer retained.'
               : ''),
         )
-        if (result.content) {
-          const clean = result.content.replace(/\x1b\[[0-9;]*m/g, '')
-          const replace =
-            !consoleHasRef.current ||
-            result.reset ||
-            result.offset < consoleOffsetRef.current ||
-            (result.source || '') !== consoleSourceRef.current
-          setConsoleText((previous) => {
-            const text = replace ? clean : previous + clean
-            return text.length > 512 * 1024
-              ? '[Earlier output omitted from display]\n' +
-                  text.slice(-(512 * 1024))
-              : text
-          })
-          consoleHasRef.current = true
-        } else if (!consoleHasRef.current)
-          setConsoleText(
+        const replace =
+          !consoleHasRef.current ||
+          !!result.reset ||
+          result.offset < consoleOffsetRef.current ||
+          (result.source || '') !== consoleSourceRef.current ||
+          (result.path || '') !== consolePathRef.current ||
+          (result.run_id || '') !== consoleRunRef.current
+        // Support older backends while retaining metadata on current ones.
+        const entries =
+          result.entries ??
+          (result.content
+            ? result.content
+                .replace(/\n$/, '')
+                .split('\n')
+                .map((text) => ({ text }))
+            : [])
+        if (replace) consoleHasRef.current = false
+        if (entries.length || replace)
+          setConsoleBuffer((previous) =>
+            appendConsoleEntries(previous, entries, replace),
+          )
+        if (entries.length) consoleHasRef.current = true
+        if (!consoleHasRef.current)
+          setConsoleMessage(
             result.available
               ? '(log is empty)'
               : '(no log yet — launch a server from Monitor)',
@@ -638,14 +678,12 @@ export function useLauncher() {
         consoleOffsetRef.current = result.offset
         consoleCursorRef.current = result.cursor || ''
         consoleSourceRef.current = result.source || ''
+        consolePathRef.current = result.path || ''
+        consoleRunRef.current = result.run_id || ''
         setConsoleOffset(result.offset)
-        requestAnimationFrame(() => {
-          if (consoleStickRef.current && consolePreRef.current)
-            consolePreRef.current.scrollTop = consolePreRef.current.scrollHeight
-        })
       } catch {
         if (live && !consoleHasRef.current)
-          setConsoleText('Could not read console output.')
+          setConsoleMessage('Could not read console output.')
       } finally {
         pending = false
       }
@@ -731,6 +769,8 @@ export function useLauncher() {
     consoleLogError,
     consoleOffset,
     consoleText,
+    consoleFilter,
+    setConsoleFilter,
     consolePreRef,
     consoleStickRef,
     deleteButtonRef,

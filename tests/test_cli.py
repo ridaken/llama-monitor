@@ -176,8 +176,11 @@ def test_history_filters_and_logs_tail(invoke):
     code, _, calls = invoke(["history", "list", "--model", "a b", "--from-ts", "12", "--cursor", "opaque"], lambda _: {})
     assert code == 0 and calls[0].url.params["model"] == "a b"
     assert calls[0].url.params["from_ts"] == "12.0"
-    code, output, _ = invoke(["logs", "--tail", "2"], lambda _: {"available": True, "content": "a\nb\nc\n"})
-    assert code == 0 and output["data"]["content"] == "b\nc"
+    code, output, _ = invoke(["logs", "--tail", "2"], lambda _: {
+        "available": True, "content": "a\nb\nc\n",
+        "entries": [{"text": "a", "level": "debug"}, {"text": "b"}, {"text": "c"}],
+    })
+    assert code == 0 and output["data"] == {"available": True, "content": "b\nc"}
 
 
 def test_smoke_has_explicit_deadline(invoke):

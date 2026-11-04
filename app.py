@@ -42,6 +42,7 @@ from collectors import (
     find_llama_pids,
 )
 from history import HistoryDB, LogFollower, decode_log_line
+import console_output
 from activity import ActivityHistory
 from launcher import LaunchError, ServerManager, configured_model_name, resolve_binary, startup_log_path
 from placement import placement_response
@@ -686,7 +687,7 @@ def build_app(args) -> FastAPI:
                 except ValueError as exc:
                     return JSONResponse({"error": str(exc)}, status_code=400)
                 except FileNotFoundError as exc:
-                    return JSONResponse({"available": False, "content": "", "error": str(exc),
+                    return JSONResponse({"available": False, "content": "", "entries": [], "error": str(exc),
                                          "offset": 0, "size": 0, "path": "", "reset": True})
         selected_source = "managed" if path == store.MANAGED_LOG else "external"
         # Keep structured logs/history free of duplicate stderr output. Only
@@ -697,7 +698,7 @@ def build_app(args) -> FastAPI:
         if source and source != selected_source:
             offset = 0
         if not path or not os.path.isfile(path):
-            return JSONResponse({"available": False, "content": "", "offset": 0, "size": 0, "path": path})
+            return JSONResponse({"available": False, "content": "", "entries": [], "offset": 0, "size": 0, "path": path})
         try:
             size = os.path.getsize(path)
             start = offset
@@ -722,15 +723,18 @@ def build_app(args) -> FastAPI:
                 else:
                     raw = raw[:end + 1]
                     new_offset = first_complete + end + 1
-            content = "\n".join(decode_log_line(line.decode("utf-8", "replace")) or
-                                line.decode("utf-8", "replace").strip()
-                                for line in raw.splitlines())
+            entries = []
+            for line in raw.splitlines():
+                decoded = line.decode("utf-8", "replace")
+                text = decode_log_line(decoded) or decoded.strip()
+                entries.append(console_output.entry(decoded, text))
+            content = "\n".join(item["text"] for item in entries)
             if raw.endswith(b"\n") and content:
                 content += "\n"
         except Exception as e:
-            return JSONResponse({"available": False, "error": str(e), "content": "",
+            return JSONResponse({"available": False, "error": str(e), "content": "", "entries": [],
                                  "offset": offset, "size": 0, "path": path})
-        return JSONResponse({"available": True, "content": content,
+        return JSONResponse({"available": True, "content": content, "entries": entries,
                              "offset": new_offset, "size": size, "path": path, "source": selected_source})
 
     @app.post("/api/launcher/settings")

@@ -221,6 +221,7 @@ test('launch errors and console tail behavior are visible', async ({
   await page.locator('#lx-launch').click()
   await expect(page.locator('#lx-launch-msg')).toContainText('Invalid model')
   await page.locator('#lx-console').click()
+  await page.getByRole('radio', { name: 'Traces', exact: true }).check()
   await expect(page.locator('#console-out')).toContainText('first')
   await expect(page.locator('#console-out')).toContainText('rotated')
   await expect(page.locator('#console-out')).not.toContainText('first')

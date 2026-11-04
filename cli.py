@@ -249,6 +249,7 @@ def execute(args, client):
         result = client.request("GET", "/api/launcher/console", params={"run_id": args.run} if args.run else None)
         if not result.get("available"):
             raise CLIError(result.get("error") or "Server log is unavailable.")
+        result.pop("entries", None)  # browser-only metadata must not bypass --tail
         result["content"] = "\n".join(result.get("content", "").splitlines()[-args.tail:])
         return result
     if command in ("history", "activity"):

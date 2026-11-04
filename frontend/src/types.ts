@@ -184,6 +184,13 @@ export type LogRun = {
   logging_error: string | null
   startup_truncated: boolean
 }
+export type ConsoleEntry = {
+  text: string
+  type?: string
+  level?: string
+  continuation?: boolean
+}
+
 export type RuntimeInfo = {
   containerized: boolean
   models_dir: string | null
