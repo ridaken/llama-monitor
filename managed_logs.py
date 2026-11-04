@@ -14,6 +14,7 @@ import time
 import uuid
 
 import store
+import console_output
 from collectors import DeviceMemory, _DEVINFO_RE, _SPEC_RE
 from placement import LayerPlacement
 
@@ -195,6 +196,7 @@ def console(run_id: str, cursor: str = "", offset: int = 0, *, follow_latest: bo
             raise ValueError("Invalid log cursor.") from exc
     raw, position, gap = read(run_id, offset, tail=not cursor and offset == 0)
     lines = []
+    entries = []
     for line in raw.splitlines():
         try:
             obj = json.loads(line)
@@ -202,9 +204,10 @@ def console(run_id: str, cursor: str = "", offset: int = 0, *, follow_latest: bo
         except (ValueError, AttributeError):
             msg = line.decode("utf-8", "replace")
         lines.append(msg.rstrip())
+        entries.append(console_output.entry(line.decode("utf-8", "replace"), msg.rstrip()))
     paths = segments(run_id)
     size = int(paths[-1].stem) + paths[-1].stat().st_size if paths else 0
-    return {"available": True, "content": "\n".join(lines) + ("\n" if lines else ""),
+    return {"available": True, "content": "\n".join(lines) + ("\n" if lines else ""), "entries": entries,
             "offset": position, "size": size, "path": str(run_dir(run_id)), "source": "filtered",
             "run_id": run_id, "cursor": base64.urlsafe_b64encode(json.dumps([run_id, position]).encode()).decode(),
             "reset": gap or switched, "gap": gap or record.get("gap", False), "error": record.get("logging_error"),

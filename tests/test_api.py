@@ -345,6 +345,58 @@ def test_console_endpoint_missing_log_is_unavailable(client):
     body = client.get("/api/launcher/console", params={"offset": 0}).json()
     assert body["available"] is False
     assert body["content"] == ""
+    assert body["entries"] == []
+
+
+def test_console_entries_preserve_managed_metadata_and_storage(client):
+    capture = managed_logs.Writer("c" * 32, "Metadata test")
+    capture.feed(json.dumps({"type": "log", "level": "debug", "msg": "device detail"}))
+    capture.feed(json.dumps({"type": "log", "level": "error", "msg": "allocation failed"}))
+    capture.feed("    diagnostic continuation")
+    capture.finish(7)
+    before = {path: path.read_bytes() for path in managed_logs.segments(capture.run_id)}
+    first = client.get("/api/launcher/console", params={"run_id": capture.run_id}).json()
+    assert first["entries"][:3] == [
+        {"text": "device detail", "type": "log", "level": "debug"},
+        {"text": "allocation failed", "type": "log", "level": "error"},
+        {"text": "    diagnostic continuation", "type": "log", "level": "info", "continuation": True},
+    ]
+    assert first["entries"][-1]["type"] == "lifecycle"
+    assert first["content"] == "\n".join(item["text"] for item in first["entries"]) + "\n"
+    second = client.get("/api/launcher/console", params={"run_id": capture.run_id, "cursor": first["cursor"]}).json()
+    assert second["entries"] == [] and second["content"] == ""
+    assert second["cursor"] == first["cursor"]
+    assert before == {path: path.read_bytes() for path in managed_logs.segments(capture.run_id)}
+
+
+@pytest.mark.parametrize("source", ["managed", "external", "startup"])
+def test_console_entries_support_legacy_external_and_startup(client, tmp_path, source):
+    from pathlib import Path
+
+    path = Path(store.MANAGED_LOG if source == "managed" else
+                launcher.startup_log_path() if source == "startup" else tmp_path / "external.log")
+    raw = (json.dumps({"type": "log", "level": "WARNING", "msg": "a diagnostic"}) +
+           "\n    stack frame\n")
+    path.write_text(raw, encoding="utf-8")
+
+    def check(reader):
+        first = reader.get("/api/launcher/console").json()
+        assert first["source"] == source
+        assert first["content"] == "a diagnostic\nstack frame\n"
+        assert first["entries"] == [
+            {"text": "a diagnostic", "type": "log", "level": "WARNING"},
+            {"text": "stack frame", "continuation": True},
+        ]
+        second = reader.get("/api/launcher/console", params={"offset": first["offset"], "source": source}).json()
+        assert second["entries"] == [] and second["offset"] == first["offset"]
+        assert path.read_text(encoding="utf-8") == raw
+
+    if source == "external":
+        args = argparse.Namespace(llama_url="http://127.0.0.1:9", llama_log=str(path), port=8500, host="127.0.0.1")
+        with TestClient(app_module.build_app(args)) as external:
+            check(external)
+    else:
+        check(client)
 
 
 # --------------------------------------------------------------------------- #
