@@ -308,6 +308,45 @@ def test_browse_lists_dirs_and_filters_files(client, tmp_path):
     assert body["parent"] is not None
 
 
+def test_browse_accepts_pasted_directory_and_selected_file(client, tmp_path):
+    folder = tmp_path / "My models"
+    folder.mkdir()
+    model = folder / "model.gguf"
+    model.touch()
+    for path in (str(folder), str(model), f'  "{folder}"  '):
+        response = client.get("/api/browse", params={"path": path, "ext": ".gguf"})
+        assert response.status_code == 200
+        assert response.json()["path"] == str(folder)
+        assert response.json()["files"] == [str(model)]
+
+
+@pytest.mark.parametrize("path", [
+    r"\\wsl.localhost\Ubuntu\home\tom",
+    r"\\wsl$\Ubuntu\home\tom",
+    "//wsl.localhost/Ubuntu/home/tom",
+    "C:/Models",
+    r'"D:\AI Models"',
+])
+def test_container_browse_explains_host_paths(client, monkeypatch, path):
+    monkeypatch.setattr(app_module.runtime, "containerized", lambda: True)
+    response = client.get("/api/browse", params={"path": path})
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert "File Explorer path" in error
+    assert "/models" in error and "MODELS_DIR" in error
+    assert "docker compose up -d" in error
+    assert "No such file" not in error
+
+
+def test_container_browse_defaults_to_mounted_models(client, monkeypatch):
+    monkeypatch.setattr(app_module.runtime, "containerized", lambda: True)
+    seen = []
+    monkeypatch.setattr(app_module.os, "listdir", lambda path: seen.append(path) or [])
+    response = client.get("/api/browse")
+    assert response.status_code == 200
+    assert seen == [app_module.os.path.abspath("/models")]
+
+
 def test_launch_with_bad_model_returns_400(client):
     r = client.post("/api/launcher/launch",
                     json={"model_path": "C:/definitely/missing.gguf", "port": 8001, "flags": []})

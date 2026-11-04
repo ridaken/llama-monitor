@@ -100,6 +100,7 @@ export function useLauncher() {
   const [flagsCollapsed, setFlagsCollapsed] = useState(true)
   const [browse, setBrowse] = useState<Browse | null>(null)
   const [browseLoading, setBrowseLoading] = useState(false)
+  const [browsePath, setBrowsePath] = useState('')
   const [consoleBuffer, setConsoleBuffer] = useState(emptyConsoleBuffer)
   const [consoleFilter, setConsoleFilter] = useState<ConsoleFilter>('events')
   const [consoleMessage, setConsoleMessage] = useState('')
@@ -535,21 +536,22 @@ export function useLauncher() {
     })
 
   const goBrowse = async (path: string, type: 'model' | 'binary') => {
+    setBrowsePath(path)
     setBrowseLoading(true)
     try {
-      setBrowse(
-        await api<Browse>(
-          `/api/browse?path=${encodeURIComponent(path)}${type === 'model' ? '&ext=.gguf' : navigator.platform.startsWith('Win') ? '&ext=.exe' : ''}`,
-        ),
+      const result = await api<Browse>(
+        `/api/browse?path=${encodeURIComponent(path)}${type === 'model' ? '&ext=.gguf' : navigator.platform.startsWith('Win') ? '&ext=.exe' : ''}`,
       )
+      setBrowse(result)
+      setBrowsePath(result.path)
     } catch (error) {
-      setBrowse((previous) => ({
-        path: previous?.path || path,
-        parent: previous?.parent || null,
+      setBrowse({
+        path,
+        parent: null,
         dirs: [],
         files: [],
         error: (error as Error).message,
-      }))
+      })
     } finally {
       setBrowseLoading(false)
     }
@@ -559,10 +561,9 @@ export function useLauncher() {
       type === 'model'
         ? draft.model_path || state?.settings.models_dir || ''
         : state?.settings.llama_server_path || ''
-    const start = chosen ? chosen.replace(/[\\/][^\\/]*$/, '') : ''
     setBrowse(null)
     setModal(type === 'model' ? 'browse-model' : 'browse-binary')
-    goBrowse(start, type)
+    goBrowse(chosen, type)
   }
   const chooseFile = async (path: string) => {
     const notify = (text: string, bad = false) =>
@@ -757,6 +758,8 @@ export function useLauncher() {
     editFlag,
     browse,
     browseLoading,
+    browsePath,
+    setBrowsePath,
     goBrowse,
     openBrowse,
     chooseFile,
