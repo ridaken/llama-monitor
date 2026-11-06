@@ -53,10 +53,35 @@ def client(monkeypatch, tmp_path):
 def test_launcher_state_shape(client):
     r = client.get("/api/launcher/state")
     assert r.status_code == 200
+
     body = r.json()
     assert set(["settings", "binary_valid", "configs", "status", "managed_log"]) <= body.keys()
     assert body["status"]["state"] == "stopped"
     assert body["autostart_error"] is None
+
+
+def test_embedding_role_configs_settings_and_logs_are_isolated(client):
+    primary = {"name": "same", "model_path": "/models/primary.gguf", "port": 8001}
+    embedding = {"name": "same", "model_path": "/models/embed.gguf", "port": 8081}
+    assert client.post("/api/configs", json=primary).status_code == 200
+    assert client.post("/api/configs?role=embeddings", json=embedding).status_code == 200
+    assert client.post("/api/configs/default?role=embeddings", json={"name": "same"}).status_code == 200
+    assert client.get("/api/configs").json()["configs"] == [primary]
+    assert client.get("/api/configs?role=embeddings").json()["configs"][0]["port"] == 8081
+    result = client.post("/api/launcher/settings?role=embeddings", json={"cpu_fallback": True, "autostart_after_primary": True})
+    assert result.json()["settings"]["cpu_fallback"] is True
+    assert "operation" not in result.json()["settings"]
+    assert "cpu_fallback" not in client.get("/api/launcher/state").json()["settings"]
+    assert client.post("/api/launcher/settings?role=embeddings", json={"cpu_fallback": "yes"}).status_code == 400
+    assert client.get("/api/launcher/state?role=invalid").status_code == 422
+    primary_log = managed_logs.Writer("c" * 32)
+    embedding_log = managed_logs.Writer("d" * 32, role="embeddings")
+    primary_log.event("primary output")
+    embedding_log.event("embedding output")
+    assert "primary output" in client.get("/api/launcher/console").json()["content"]
+    assert "embedding output" in client.get("/api/launcher/console?role=embeddings").json()["content"]
+    assert client.get(f"/api/launcher/console?role=embeddings&run_id={primary_log.run_id}").status_code == 400
+    assert client.get(f"/api/launcher/console?run_id={embedding_log.run_id}").status_code == 400
 
 
 def test_autostart_setting_round_trip_without_immediate_launch(client, monkeypatch):

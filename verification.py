@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 
 import httpx
@@ -49,7 +50,8 @@ class ManagedVerification:
             snapshot = self.manager.snapshot()
         except (LaunchError, RuntimeError, psutil.Error) as exc:
             raise VerificationError("Cannot verify managed process identity.") from exc
-        record = store.get_running() or {}
+        record = (store.get_running() if getattr(self.manager, "role", "primary") == "primary"
+                  else store.get_running("embeddings")) or {}
         if snapshot is None or record.get("pid") != snapshot["pid"] or not record.get("run_id"):
             raise VerificationError("Managed process identity is unavailable.")
         snapshot["run_id"] = record["run_id"]
@@ -120,6 +122,11 @@ class ManagedVerification:
 
         async def complete():
             async with httpx.AsyncClient(timeout=remaining, trust_env=False, follow_redirects=False) as client:
+                if getattr(self.manager, "role", "primary") == "embeddings":
+                    response = await client.post(f"http://127.0.0.1:{snapshot['port']}/v1/embeddings",
+                                                 json={"input": "Embedding verification."})
+                    response.raise_for_status()
+                    return response.json()
                 response = await client.post(f"http://127.0.0.1:{snapshot['port']}/v1/chat/completions", json={
                     "messages": [{"role": "user", "content": "Reply with OK."}],
                     "temperature": 0, "max_tokens": 16, "stream": False})
@@ -135,6 +142,16 @@ class ManagedVerification:
         self._unchanged(snapshot)
         if time.monotonic() - started >= timeout:
             raise VerificationTimeout("Inference verification deadline exceeded.")
+        if getattr(self.manager, "role", "primary") == "embeddings":
+            try:
+                vector = body["data"][0]["embedding"]
+                if not isinstance(vector, list) or not vector or not all(
+                        type(x) in (int, float) and math.isfinite(x) for x in vector):
+                    raise ValueError("Invalid embedding vector")
+            except (KeyError, IndexError, TypeError, ValueError) as exc:
+                raise VerificationError("Inference returned no finite embedding vector.") from exc
+            return {"run_id": snapshot["run_id"], "elapsed_seconds": time.monotonic() - started,
+                    "dimensions": len(vector), "usage": body.get("usage")}
         try:
             choice = body["choices"][0]
             message = choice["message"]

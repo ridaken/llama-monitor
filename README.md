@@ -45,7 +45,7 @@ Designed to run on the **same machine** as llama-server and the GPUs.
 ## How it works
 
 The browser and [CLI](docs/cli.md) talk to the same Python/FastAPI backend. It
-starts one managed primary llama-server, or watches a server you started yourself.
+starts a managed primary llama-server and an optional embedding server, or watches a server you started yourself.
 Model/slot data comes from llama-server HTTP endpoints; a background log reader
 collects startup allocations and generation timings and stores activity in local
 SQLite. NVML supplies NVIDIA GPU telemetry, and psutil supplies RAM/process data.
@@ -127,16 +127,16 @@ or file paths, and **Mounted models (/models)** returns to the mounted folder.
 The dashboard is also available at `http://<host-LAN-IP>:8500`, and the managed
 server's OpenAI-compatible API at `http://<host-LAN-IP>:8001/v1`. After enabling
 **Manage → Inference proxy**, clients can use `http://<host-LAN-IP>:8501/v1`.
-All three ports use `BIND_ADDRESS` and are published on all host interfaces by
+The dashboard, primary inference, and embedding ports use `BIND_ADDRESS` and are published on all host interfaces by
 default; `PROXY_BIND_ADDRESS` can override just the proxy. **Use a trusted LAN:**
 the dashboard has no built-in authentication, and connected users can browse
 container files and control the managed server. Do not expose these ports directly to the internet.
 Set `BIND_ADDRESS=127.0.0.1` in `.env` to restrict access to this computer.
 
-`DASHBOARD_PORT`, `INFERENCE_PORT`, and `PROXY_PORT` in `.env` change the **host**
+`DASHBOARD_PORT`, `INFERENCE_PORT`, `EMBEDDING_PORT`, and `PROXY_PORT` in `.env` change the **host**
 ports, including when another native installation already uses one. The internal
-ports remain 8500, 8001, and 8501; the launcher fixes its port to 8001 so publishing
-keeps working. Apply port or mount changes with `docker compose up -d`.
+ports remain 8500, 8001, 8081, and 8501; managed primary and embedding
+launches use internal ports 8001 and 8081 so publishing keeps working. Apply port or mount changes with `docker compose up -d`.
 
 ### CPU-only installation
 
@@ -237,8 +237,8 @@ prompts. Add `--json` for a machine-readable result and inspect the exit code.
 `status` confirms backend availability even if no model runs. Launch/restart
 confirm process startup; `--wait` verifies the same managed run owns its port and
 passes a fresh health check. `smoke` sends one short chat completion and consumes
-inference resources. It verifies the managed primary, not external watch targets
-or embedding-only servers.
+inference resources. It verifies the managed primary by default. Add `--role embeddings` to verify
+the managed embedding endpoint; external watch targets are not probed.
 
 See the **[CLI reference](docs/cli.md)** for every command/option, configuration
 JSON and stdin examples, history pagination, response envelopes, exit codes,
@@ -291,6 +291,59 @@ GPU access in that incident; stopping WSL as well was necessary. Keep WSL,
 Docker Desktop, and the Windows NVIDIA driver current. See
 [Docker's WSL guidance](https://docs.docker.com/desktop/features/wsl/best-practices/)
 and [GPU prerequisites](https://docs.docker.com/desktop/features/gpu/).
+
+## Embedding model companion
+
+Monitor includes an **Embedding model** panel with independent Start, Stop,
+Restart, configuration, and logs. Save embedding configurations separately from
+primary configurations and set one as the shared embedding default. Both roles
+use the configured llama-server executable. Managed embeddings enable
+`--embedding`; pooling uses the model default unless you supply an override.
+
+In the embedding configuration dialog, optionally enable **Start the default
+embedding configuration after primary is ready** and **Retry failed embedding
+loads on CPU**. Both settings start disabled. Automatic startup waits for the
+verified primary process to own its port and pass a fresh health check. Each
+loading attempt has a five-minute deadline. Primary startup does not wait for
+embeddings to become ready.
+
+Embeddings can also run standalone. Launching or replacing the primary stops a
+running managed companion first, then restores it after the primary is ready.
+**Stop both** cancels pending launches and stops both managed roles. Embedding
+Stop cancels only the companion until you start it again or explicitly launch
+the primary again. A primary load failure leaves embeddings waiting; an embedding
+failure leaves the primary running. Models that crash after readiness are not
+automatically restarted.
+
+CPU fallback makes one additional attempt after a failed embedding load, only
+when failed-process cleanup succeeds and the binary advertises CPU-only execution
+flags. It temporarily overrides GPU placement without changing saved flags.
+The panel reports **Running on CPU** on success. Missing files, invalid settings,
+port conflicts, cancellation, and unverified ownership do not trigger fallback.
+Allow sufficient system RAM for CPU inference. Future starts use the saved flags.
+
+For Docker on Windows, place **both sets of weights in WSL's Linux filesystem**
+and run Compose from that distribution. For example, set
+`MODELS_DIR=/home/tom/models`, with primary weights under
+`/home/tom/models/primary` and embeddings under `/home/tom/models/embeddings`.
+Both use the existing read-only mount: select `/models/primary/model.gguf` and
+`/models/embeddings/model.gguf`. No second mount or model copying is needed.
+Windows File Explorer WSL paths are not container model paths. Native
+installations use paths accessible to the native backend.
+
+Embedding inference uses a separate OpenAI-compatible endpoint:
+`http://<host>:8081/v1/embeddings`. Docker fixes its internal port to 8081;
+`EMBEDDING_PORT` changes the published host port and `BIND_ADDRESS` controls its
+exposure. Recreate the container to publish the new port. Native configurations
+can choose another available port. The existing inference proxy serves the
+primary only. Primary telemetry/history remain focused on the primary; GPU
+usage-delta memory estimates are disabled while managed embeddings are running.
+
+Native backend restarts re-adopt both verified processes. Container and isolated
+test shutdown stop both. Boot and gaming recovery load primary before embeddings,
+restoring only captured models. Legacy external embedding registration remains
+available on native Windows; unregister a legacy port before managing it through
+the new panel. Managed and external registrations cannot own the same process.
 
 ## Hardware memory and layer placement
 

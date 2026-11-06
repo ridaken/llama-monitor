@@ -127,7 +127,7 @@ class WindowsStartup:
                         models=pending["models"] if installed else [], boot_marker=pending["boot_marker"],
                         pending=None, last_error=None, last_result="Setup completed; applies on next boot or sign-in.")
                     embedding = next((s for s in pending["models"] if s["id"] == "embeddings"), None)
-                    if installed and embedding and not state["gaming"]["auxiliary"]:
+                    if installed and embedding and not embedding.get("managed") and not state["gaming"]["auxiliary"]:
                         state["gaming"]["auxiliary"] = {"executable": embedding["executable"], "port": embedding["port"]}
                 store.update_state(apply)
             else:

@@ -560,10 +560,16 @@ def collect_sysmem(llama_pids: Optional[set[int]] = None) -> dict:
 
 
 def find_llama_pids(name_hint: str = "llama", port: Optional[int] = None) -> set[int]:
-    """Find llama-server PID(s) by process name and/or the port it listens on."""
+    """Find a specific listener, or discover by name when no port is given."""
     pids: set[int] = set()
     if psutil is None:
         return pids
+    if port:
+        try:
+            return {c.pid for c in psutil.net_connections(kind="inet")
+                    if c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port and c.pid}
+        except Exception:
+            return set()  # Name matching could attribute another model's memory.
     for proc in psutil.process_iter(["pid", "name"]):
         try:
             nm = (proc.info.get("name") or "").lower()
@@ -571,13 +577,6 @@ def find_llama_pids(name_hint: str = "llama", port: Optional[int] = None) -> set
                 pids.add(proc.info["pid"])
         except Exception:
             continue
-    if port:
-        try:
-            for c in psutil.net_connections(kind="inet"):
-                if c.laddr and c.laddr.port == port and c.pid:
-                    pids.add(c.pid)
-        except Exception:
-            pass
     return pids
 
 

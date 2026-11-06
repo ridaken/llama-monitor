@@ -27,6 +27,7 @@ import managed_logs
 import string
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+from typing import Literal
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -49,6 +50,7 @@ from launcher import LaunchError, ServerManager, configured_model_name, resolve_
 from placement import placement_response
 from diagnostics import doctor
 from gaming import GamingCoordinator
+from lifecycle import ModelLifecycle
 from apollo import ApolloClient, certificate_fingerprint, parse_url, protect, unprotect
 from apollo_setup import commands as hook_commands, write_hook_config
 from processes import discover_registered
@@ -58,6 +60,8 @@ from background import log_config as background_log_config
 from verification import (ManagedVerification, SmokeRequest, InferenceTest, TestPromptRequest,
                           VerificationError, VerificationTimeout)
 from proxy import Proxy
+
+ModelRole = Literal["primary", "embeddings"]
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(HERE, "static")
@@ -169,13 +173,22 @@ def build_app(args) -> FastAPI:
             retarget(f"http://127.0.0.1:{a_port}",
                      adopted.get("log_path") or store.MANAGED_LOG, a_port)
 
+    embeddings = ServerManager(lambda *args: None, role="embeddings")
+    if runtime.containerized() or test_mode:
+        store.set_running(None, "embeddings")
+        store.update_state(lambda state: state["embeddings"].update(operation=None))
+    else:
+        embeddings.adopt()
     gaming = GamingCoordinator(manager)
+    lifecycle = ModelLifecycle(manager, embeddings, gaming,
+                               reserved_ports=(getattr(args, "port", 8500), getattr(args, "proxy_port", 8501)))
     if test_mode:
         gaming.transition = None
     windows_startup = WindowsStartup(gaming, getattr(args, "port", 8500), test_mode=test_mode)
     if not test_mode:
         gaming.startup_results = windows_startup.consume_result
     verification = ManagedVerification(manager, gaming)
+    embedding_verification = ManagedVerification(embeddings, gaming)
 
     def proxy_target():
         target = rt["proxy_target"].copy()
@@ -200,15 +213,20 @@ def build_app(args) -> FastAPI:
             await asyncio.to_thread(gaming.start, autostart_default=not cli_target_explicit)
         elif not test_mode and not cli_target_explicit:
             await asyncio.to_thread(gaming.start_default_model)
+        lifecycle.start()
         # Native launches outlive the backend; container launches stop with it.
         try:
             yield
         finally:
             await proxy.close()
+            lifecycle.close()
             gaming.close()
             try:
                 if runtime.containerized() or test_mode:
-                    manager.stop(reason="test_shutdown" if test_mode else "container_shutdown")
+                    try:
+                        lifecycle.stop_embeddings("test_shutdown" if test_mode else "container_shutdown")
+                    finally:
+                        manager.stop(reason="test_shutdown" if test_mode else "container_shutdown")
             finally:
                 follower.stop()
                 rt["llama"].close()
@@ -267,7 +285,15 @@ def build_app(args) -> FastAPI:
         return {"status": "ok"}
 
     @app.get("/api/launcher/readiness")
-    def readiness():
+    def readiness(role: ModelRole = "primary"):
+        if role == "embeddings":
+            status = lifecycle.state()
+            if gaming.state()["blocked"]:
+                return {**status, "state": "blocked", "ready": False, "reason": "Gaming or recovery is pending."}
+            if status["state"] == "ready":
+                verified = embedding_verification.readiness()
+                return {**status, **verified}
+            return status
         return verification.readiness()
 
     @app.get("/api/launcher/doctor")
@@ -275,9 +301,9 @@ def build_app(args) -> FastAPI:
         return doctor()
 
     @app.post("/api/launcher/smoke")
-    async def smoke(body: SmokeRequest):
+    async def smoke(body: SmokeRequest, role: ModelRole = "primary"):
         try:
-            return await verification.smoke(body.timeout)
+            return await (verification if role == "primary" else embedding_verification).smoke(body.timeout)
         except VerificationTimeout as exc:
             return JSONResponse({"error": str(exc)}, status_code=504)
         except (VerificationError, RuntimeError, OSError) as exc:
@@ -396,6 +422,13 @@ def build_app(args) -> FastAPI:
             with gaming.lock:
                 if gaming.transition:
                     raise LaunchError("Cannot change registered servers during a transition.")
+                if body.get("unregister") is True:
+                    store.update_gaming(auxiliary=None)
+                    lifecycle.legacy.record = None
+                    lifecycle.legacy.proc = None
+                    return gaming_state()
+                if embeddings.snapshot() or (lifecycle.operation or {}).get("state") in ("waiting", "loading", "cpu_retry"):
+                    raise LaunchError("Managed embeddings already have an owner; stop them before registering an external server.")
                 port = int(body.get("port", 8081))
                 if not 1 <= port <= 65535 or port == (manager.current or {}).get("port", store.DEFAULT_PORT):
                     raise ValueError("Choose a valid port different from the managed model.")
@@ -406,6 +439,8 @@ def build_app(args) -> FastAPI:
                 if not record:
                     raise ValueError("No running llama-server matches this executable and embedding port.")
                 store.update_gaming(auxiliary={"executable": record["executable"], "port": port})
+                lifecycle.legacy.record = None
+                lifecycle.legacy.proc = None
             return gaming_state()
         except Exception as exc:
             return gaming_error(exc, 400)
@@ -508,6 +543,12 @@ def build_app(args) -> FastAPI:
     @app.get("/api/stats")
     def stats(lite: int = 0) -> JSONResponse:
         llama_pids = find_llama_pids(port=rt["port"])
+        if rt["proxy_target"]["managed"]:
+            try:
+                snapshot = manager.snapshot()
+                llama_pids = {snapshot["pid"]} if snapshot else set()
+            except Exception:
+                llama_pids = set()
         data = collect_gated(lite)
         # NVML reports host PIDs, which cannot be matched safely to container PIDs.
         gpu_data = gpu.collect(set() if runtime.containerized() else llama_pids)
@@ -535,7 +576,8 @@ def build_app(args) -> FastAPI:
                 for label, mib in cache["split"].items():
                     split.append(_seg(label, int(mib * MIB)))
                 source = "log"
-            elif cache["baseline"]:
+            elif (cache["baseline"] and embeddings.status()["state"] != "running"
+                  and not store.load_state()["gaming"]["auxiliary"]):
                 split, source = _delta_split(cache["baseline"], gpu_data,
                     cache["layer_parser"].device_indices(gpu_data)), "nvml-delta"
 
@@ -626,20 +668,22 @@ def build_app(args) -> FastAPI:
     # Launcher / configuration API                                            #
     # ----------------------------------------------------------------------- #
 
-    def launcher_state() -> dict:
-        settings = store.get_settings()
-        status = manager.status()
-        record = store.get_running() or {}
+    def launcher_state(role="primary") -> dict:
+        selected = manager if role == "primary" else embeddings
+        settings = store.get_settings(role)
+        status = manager.status() if role == "primary" else lifecycle.state()
+        record = store.get_running(role) or {}
         status["run_id"] = record.get("run_id") if record.get("pid") == status.get("pid") else None
-        pending_config = gaming.primary_config()
+        pending_config = gaming.primary_config() if role == "primary" else None
         if pending_config:
             status = {**status, "config": pending_config, "config_name": pending_config.get("name")}
         return {
             "settings": settings,
             "binary_valid": bool(resolve_binary(settings.get("llama_server_path"))),
-            "configs": store.list_configs(),
+            "configs": store.list_configs(role),
             "status": status,
-            "managed_log": store.MANAGED_LOG,
+            "companion": lifecycle.state(),
+            "managed_log": selected.log_path,
             "gaming": gaming.state(),
             "runtime": runtime.info(),
             "test_mode": test_mode,
@@ -647,8 +691,8 @@ def build_app(args) -> FastAPI:
         }
 
     @app.get("/api/launcher/state")
-    def get_launcher_state() -> JSONResponse:
-        return JSONResponse(launcher_state())
+    def get_launcher_state(role: ModelRole = "primary") -> JSONResponse:
+        return JSONResponse(launcher_state(role))
 
     @app.get("/api/launcher/flags")
     def get_flags() -> JSONResponse:
@@ -662,21 +706,31 @@ def build_app(args) -> FastAPI:
     CONSOLE_HEAD = 256 * 1024
 
     @app.get("/api/launcher/log-runs")
-    def get_log_runs(limit: int = 50, cursor: str = "") -> JSONResponse:
+    def get_log_runs(limit: int = 50, cursor: str = "", role: ModelRole = "primary") -> JSONResponse:
         try:
             managed_logs.reconcile()
-            return JSONResponse(managed_logs.list_runs(limit, cursor))
+            return JSONResponse(managed_logs.list_runs(limit, cursor, role=role))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 
     @app.get("/api/launcher/console")
-    def get_console(offset: int = 0, source: str = "", run_id: str = "", cursor: str = "") -> JSONResponse:
+    def get_console(offset: int = 0, source: str = "", run_id: str = "", cursor: str = "", role: ModelRole = "primary") -> JSONResponse:
         """Stream the active server log (console output) incrementally.
 
         Reads the currently-monitored log (the managed log for launched servers,
         or the watched ``--llama-log`` for an external one). Mirrors the follower's
         truncation handling so a restart/rotation re-reads from the top.
         """
+        if role == "embeddings":
+            selected = run_id or embeddings.run_id or managed_logs.latest(role)
+            if not selected:
+                return JSONResponse({"available": False, "content": "", "entries": [], "error": "No embedding log yet."})
+            try:
+                if managed_logs.load(selected).get("role", "primary") != role:
+                    raise ValueError("Log run belongs to a different model role.")
+                return JSONResponse(managed_logs.console(selected, cursor, offset, follow_latest=not run_id))
+            except (ValueError, FileNotFoundError) as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
         path = rt["log_path"] or store.MANAGED_LOG
         if run_id or path == store.MANAGED_LOG:
             captured = manager.run_id if manager.run_id and managed_logs.load(manager.run_id) else None
@@ -684,6 +738,8 @@ def build_app(args) -> FastAPI:
             selected = run_id or captured or (None if legacy else managed_logs.latest())
             if selected:
                 try:
+                    if managed_logs.load(selected).get("role", "primary") != role:
+                        raise ValueError("Log run belongs to a different model role.")
                     return JSONResponse(managed_logs.console(selected, cursor, offset, follow_latest=not run_id))
                 except ValueError as exc:
                     return JSONResponse({"error": str(exc)}, status_code=400)
@@ -739,9 +795,13 @@ def build_app(args) -> FastAPI:
                              "offset": new_offset, "size": size, "path": path, "source": selected_source})
 
     @app.post("/api/launcher/settings")
-    async def post_settings(request: Request) -> JSONResponse:
+    async def post_settings(request: Request, role: ModelRole = "primary") -> JSONResponse:
         body = await request.json()
         try:
+            if role == "embeddings":
+                store.update_settings(role=role, **{key: body[key] for key in
+                                      ("autostart_after_primary", "cpu_fallback") if key in body})
+                return JSONResponse(launcher_state(role))
             store.update_settings(
                 llama_server_path=body.get("llama_server_path"),
                 models_dir=body.get("models_dir"),
@@ -809,57 +869,57 @@ def build_app(args) -> FastAPI:
         return JSONResponse({"path": path, "parent": parent, "dirs": dirs, "files": files})
 
     @app.get("/api/configs")
-    def get_configs() -> JSONResponse:
-        return JSONResponse({"configs": store.list_configs()})
+    def get_configs(role: ModelRole = "primary") -> JSONResponse:
+        return JSONResponse({"configs": store.list_configs(role)})
 
     @app.post("/api/configs")
-    async def post_config(request: Request) -> JSONResponse:
+    async def post_config(request: Request, role: ModelRole = "primary") -> JSONResponse:
         body = await request.json()
         try:
-            configs = store.upsert_config(body)
+            configs = store.upsert_config(body, role)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse({"configs": configs})
 
     @app.delete("/api/configs/{name}")
-    def remove_config(name: str) -> JSONResponse:
-        return JSONResponse({"configs": store.delete_config(name)})
+    def remove_config(name: str, role: ModelRole = "primary") -> JSONResponse:
+        return JSONResponse({"configs": store.delete_config(name, role)})
 
     @app.post("/api/configs/default")
-    async def post_default_config(request: Request) -> JSONResponse:
+    async def post_default_config(request: Request, role: ModelRole = "primary") -> JSONResponse:
         """Set (or clear, with an empty name) the config that auto-loads on open
         when no server is running. Returns the full launcher state."""
         body = await request.json()
         try:
-            store.set_default_config(body.get("name"))
+            store.set_default_config(body.get("name"), role)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return JSONResponse(launcher_state())
+        return JSONResponse(launcher_state(role))
 
     @app.post("/api/launcher/launch")
-    async def post_launch(request: Request) -> JSONResponse:
+    async def post_launch(request: Request, role: ModelRole = "primary") -> JSONResponse:
         body = await request.json()
         try:
-            gaming.launch(body)
+            gaming.launch(body) if role == "primary" else lifecycle.launch_embeddings(body)
         except LaunchError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return JSONResponse(launcher_state())
+        return JSONResponse(launcher_state(role))
 
     @app.post("/api/launcher/stop")
-    def post_stop() -> JSONResponse:
+    def post_stop(role: ModelRole = "primary") -> JSONResponse:
         try:
-            gaming.stop_server()
+            gaming.stop_server(role)
         except Exception as exc:
             return gaming_error(exc)
-        return JSONResponse(launcher_state())
+        return JSONResponse(launcher_state(role))
 
     @app.post("/api/launcher/restart")
-    def post_restart() -> JSONResponse:
+    def post_restart(role: ModelRole = "primary") -> JSONResponse:
         try:
-            gaming.launch()
+            gaming.launch() if role == "primary" else lifecycle.launch_embeddings()
         except LaunchError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return JSONResponse(launcher_state())
+        return JSONResponse(launcher_state(role))
 
     @app.get("/")
     def index() -> FileResponse:

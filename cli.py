@@ -41,6 +41,7 @@ def positive(value):
 
 def parser():
     common = Parser(add_help=False)
+    common.add_argument("--role", choices=("primary", "embeddings"), default=argparse.SUPPRESS)
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     common.add_argument("--url", default=argparse.SUPPRESS, help="Backend URL (or LLAMA_MONITOR_URL)")
     common.add_argument("--request-timeout", type=positive, default=argparse.SUPPRESS)
@@ -136,7 +137,7 @@ class Client:
         return body
 
 
-def wait_for(client, *, backend=False, timeout=300, run_id=None):
+def wait_for(client, *, backend=False, timeout=300, run_id=None, operation_id=None):
     deadline = time.monotonic() + timeout
     while True:
         remaining = deadline - time.monotonic()
@@ -159,11 +160,16 @@ def wait_for(client, *, backend=False, timeout=300, run_id=None):
                 raise CLIError("Unexpected readiness response.", 3)
             if result["state"] in ("stopped", "failed", "blocked"):
                 raise CLIError(result.get("reason", "Managed model is unavailable."))
-            if not result.get("run_id"):
-                raise CLIError("Readiness response has no managed run identity.", 3)
-            run_id = run_id or result["run_id"]
-            if run_id != result["run_id"]:
-                raise CLIError("Managed server changed while waiting.")
+            if getattr(client, "role", "primary") == "embeddings":
+                operation_id = operation_id or result.get("operation_id")
+                if not operation_id or operation_id != result.get("operation_id"):
+                    raise CLIError("Embedding operation changed while waiting.")
+            else:
+                if not result.get("run_id"):
+                    raise CLIError("Readiness response has no managed run identity.", 3)
+                run_id = run_id or result["run_id"]
+                if run_id != result["run_id"]:
+                    raise CLIError("Managed server changed while waiting.")
             if result["ready"]:
                 return result
         time.sleep(min(0.5, max(0, deadline - time.monotonic())))
@@ -181,7 +187,20 @@ def configs(client, name=None):
     raise CLIError(f"No saved configuration named {name!r}.")
 
 
+class RoleClient:
+    def __init__(self, client, role):
+        self.client, self.role = client, role
+        self.http = client.http
+
+    def request(self, method, path, **kwargs):
+        if path.startswith(("/api/launcher/", "/api/configs")):
+            kwargs["params"] = {**(kwargs.get("params") or {}), "role": self.role}
+        return self.client.request(method, path, **kwargs)
+
+
 def execute(args, client):
+    if getattr(args, "role", "primary") == "embeddings":
+        client = RoleClient(client, "embeddings")
     command = args.command
     if command == "proxy":
         if args.action == "status":
@@ -229,9 +248,10 @@ def execute(args, client):
         result = client.request("POST", f"/api/launcher/{command}", json=body)
         if command != "stop" and args.wait:
             run_id = result.get("status", {}).get("run_id")
-            if not run_id:
+            operation_id = result.get("status", {}).get("operation_id")
+            if not run_id and not operation_id:
                 raise CLIError("Launch response has no managed run identity.", 3)
-            result["readiness"] = wait_for(client, timeout=args.timeout, run_id=run_id)
+            result["readiness"] = wait_for(client, timeout=args.timeout, run_id=run_id, operation_id=operation_id)
         return result
     if command == "wait":
         return wait_for(client, backend=args.backend, timeout=args.timeout)

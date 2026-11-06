@@ -93,7 +93,7 @@ gaming while stale model/inference fields are removed.
 | `GET /api/launcher/state` | None | Launcher state below; refreshes process status. Does not prove readiness. |
 | `POST /api/launcher/launch` | Configuration object | Launcher state. Validates the executable, existing GGUF path, and port; stops/replaces the previous managed server and retargets monitoring. Does not save a named configuration. HTTP 400 for handled launch errors, including pending switching/recovery. |
 | `POST /api/launcher/restart` | No body required | Launcher state; restarts the manager's current configuration. HTTP 400 if none exists or restart is blocked/invalid. |
-| `POST /api/launcher/stop` | No body required | Launcher state; stops the managed primary and cancels its pending restoration. HTTP 409 for handled stop failures. Does not stop an arbitrary watched server. |
+| `POST /api/launcher/stop` | No body required | Launcher state; stops both managed models and cancels their pending launches/restoration. HTTP 409 for handled stop failures. Does not stop an arbitrary watched server. |
 | `GET /api/launcher/flags` | None | `{source, flags}`: source `help` or `bundled`; entries `{flags: [aliases], value_hint, desc}`. Runs the configured binary's `--help`, cached per path/mtime; falls back on absence, failure, or empty parsing. |
 
 Launch uses `model_path`, `port`, optional `flags` and `log_prompts`, plus `name`
@@ -133,7 +133,7 @@ FizzBuzz answer. Proxy capture settings apply normally, and the proxy request ID
 can be used with `/api/requests/{id}`. Direct tests do not create proxy records.
 Timeouts close the request connection, but computation may still finish upstream.
 
-Readiness is for the managed primary, not an external watch target. Example:
+Readiness defaults to the managed primary; use `role=embeddings` for the companion. External watch targets are not verified. Example:
 
 ```sh
 curl http://127.0.0.1:8500/api/launcher/readiness
@@ -408,3 +408,42 @@ Content and usage interpretation are best effort, and storage failures do not fa
 inference. Requests and log-derived Activity history are never joined by timestamp.
 There is no automatic expiry. The dashboard's existing access model applies to
 these settings and saved content.
+
+## Primary and embedding roles
+
+Configuration and launcher endpoints accept the optional query parameter
+`role=primary|embeddings`; omission preserves primary behavior. Invalid roles
+return HTTP 422. This applies to `/api/configs` (GET/POST),
+`/api/configs/{name}` (DELETE), `/api/configs/default` (POST),
+`/api/launcher/state`, `/launch`, `/stop`, `/restart`, `/readiness`, `/console`,
+`/log-runs`, and `/smoke` under `/api/launcher`. The executable and its discovered
+flags are shared. Configuration names and defaults are scoped by role.
+
+`POST /api/launcher/settings?role=embeddings` accepts Boolean
+`autostart_after_primary` and `cpu_fallback`, both defaulting false. Set the
+embedding default through `POST /api/configs/default?role=embeddings` with
+`{"name":"My embeddings"}`. Existing saved configurations and running records
+remain primary; no external process is silently converted into a managed model.
+
+Launcher state includes an additive `companion` object. For the embedding role,
+`status` includes `state`, `ready`, `reason`, `config`, `run_id`, `operation_id`,
+and `mode` (`configured` or `cpu`). States are `stopped`, `waiting`, `loading`,
+`cpu_retry`, `ready`, and `failed`. The stable operation identity spans the queued
+phase and a possible CPU fallback; each process attempt gets a distinct run ID.
+Lifecycle requests return promptly after queuing/spawning. Poll readiness to
+verify completion, and pin `operation_id` to detect replacement/cancellation.
+
+Primary Stop stops both managed roles; embedding Stop cancels only the companion.
+Starting the primary temporarily stops a running companion and restores it only
+after primary readiness. Loading has a five-minute deadline per attempt. Primary
+failure leaves the companion waiting. Embedding smoke sends a small
+`/v1/embeddings` request and returns `run_id`, `elapsed_seconds`, and `dimensions`
+after validating a finite, nonempty vector. Role-scoped console and run listing
+never select the other role's latest diagnostics.
+
+Embedding clients connect directly to `http://HOST:8081/v1/embeddings` by default;
+Docker's `EMBEDDING_PORT` can change the host port. The inference proxy remains
+primary-only. Native legacy registration can be cleared with
+`POST /api/gaming/auxiliary` and `{"unregister":true}`; this does not stop or adopt
+the external process. A still-running external listener must be stopped before
+a managed model can claim its port.

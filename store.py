@@ -42,6 +42,13 @@ MANAGED_LOG = os.path.join(HOME_DIR, "llama-server.log")
 PROMPTS_DIR = os.path.join(HOME_DIR, "prompts")
 
 DEFAULT_PORT = 8001
+ROLES = ("primary", "embeddings")
+
+
+def validate_role(role):
+    if role not in ROLES:
+        raise ValueError("role must be primary or embeddings")
+    return role
 
 # Serialise reads/writes so concurrent requests can't corrupt the file.
 _LOCK = threading.RLock()
@@ -70,6 +77,9 @@ def _default_state() -> dict:
         # re-adopt a still-running server instead of losing track of it. None
         # when nothing is launched (or after an explicit Stop).
         "running": None,
+        "embeddings": {"default_config": None, "default_port": 8081,
+                       "autostart_after_primary": False, "cpu_fallback": False,
+                       "running": None, "operation": None},
         "gaming": {"enabled": False, "apollo_url": "https://localhost:47990",
                    "credentials": None, "certificate_sha256": None,
                    "auxiliary": None, "transition": None},
@@ -97,7 +107,8 @@ def _normalise(state: dict) -> dict:
     gaming = {**base["gaming"], **(state.get("gaming") or {})}
     startup = {**base["startup"], **(state.get("startup") or {})}
     proxy = {**base["proxy"], **(state.get("proxy") or {})}
-    return {"settings": settings, "configs": configs, "running": running,
+    embeddings = {**base["embeddings"], **(state.get("embeddings") or {})}
+    return {"settings": settings, "configs": configs, "running": running, "embeddings": embeddings,
             "gaming": gaming, "startup": startup, "proxy": proxy}
 
 
@@ -151,73 +162,103 @@ def update_proxy(**changes) -> dict:
 # Settings                                                                     #
 # --------------------------------------------------------------------------- #
 
-def get_settings() -> dict:
-    return load_state()["settings"]
+def get_settings(role="primary") -> dict:
+    validate_role(role)
+    state = load_state()
+    return state["settings"] if role == "primary" else {**state["settings"], **{
+        key: value for key, value in state["embeddings"].items() if key not in ("running", "operation")}}
 
 
-def update_settings(**changes) -> dict:
+def update_settings(role="primary", **changes) -> dict:
     """Merge the given keys into settings and persist. Returns new settings."""
     if "autostart_default_model" in changes and type(changes["autostart_default_model"]) is not bool:
         raise ValueError("autostart_default_model must be a boolean")
-    return update_state(lambda state: state["settings"].update(
-        {k: v for k, v in changes.items() if v is not None}))["settings"]
+    validate_role(role)
+    for key in ("autostart_after_primary", "cpu_fallback"):
+        if key in changes and type(changes[key]) is not bool:
+            raise ValueError(f"{key} must be a boolean")
+    key = "settings" if role == "primary" else "embeddings"
+    update_state(lambda state: state[key].update(
+        {k: v for k, v in changes.items() if v is not None}))
+    return get_settings(role)
 
 
 # --------------------------------------------------------------------------- #
 # Currently-launched server (survives a dashboard restart)                     #
 # --------------------------------------------------------------------------- #
 
-def get_running() -> Optional[dict]:
+def get_running(role="primary") -> Optional[dict]:
     """The record of the server this dashboard launched, or None."""
-    return load_state().get("running")
+    validate_role(role)
+    state = load_state()
+    return state.get("running") if role == "primary" else state["embeddings"]["running"]
 
 
-def set_running(record: Optional[dict]) -> None:
+def set_running(record: Optional[dict], role="primary") -> None:
     """Persist (or clear, with None) the launched-server record."""
-    update_state(lambda state: state.update(running=record if isinstance(record, dict) else None))
+    validate_role(role)
+    def change(state):
+        target = state if role == "primary" else state["embeddings"]
+        target["running"] = record if isinstance(record, dict) else None
+    update_state(change)
 
 
 # --------------------------------------------------------------------------- #
 # Saved configurations                                                         #
 # --------------------------------------------------------------------------- #
 
-def list_configs() -> list[dict]:
-    return load_state()["configs"]
+def list_configs(role="primary") -> list[dict]:
+    validate_role(role)
+    return [c for c in load_state()["configs"] if c.get("role", "primary") == role]
 
 
-def get_config(name: str) -> Optional[dict]:
-    for c in load_state()["configs"]:
+def get_config(name: str, role="primary") -> Optional[dict]:
+    for c in list_configs(role):
         if c.get("name") == name:
             return c
     return None
 
 
-def upsert_config(config: dict) -> list[dict]:
+def upsert_config(config: dict, role="primary") -> list[dict]:
     """Create or overwrite a config by name. Returns the new config list."""
     name = (config.get("name") or "").strip()
     if not name:
         raise ValueError("config name is required")
+    validate_role(role)
+    config = {**config, "name": name}
+    if role != "primary":
+        config["role"] = role
+    else:
+        config.pop("role", None)
     def change(state):
-        state["configs"] = [c for c in state["configs"] if c.get("name") != name] + [config]
-    return update_state(change)["configs"]
+        state["configs"] = [c for c in state["configs"]
+                            if c.get("name") != name or c.get("role", "primary") != role] + [config]
+    update_state(change)
+    return list_configs(role)
 
 
-def delete_config(name: str) -> list[dict]:
+def delete_config(name: str, role="primary") -> list[dict]:
+    validate_role(role)
     def change(state):
-        state["configs"] = [c for c in state["configs"] if c.get("name") != name]
-        if state["settings"].get("default_config") == name:
-            state["settings"]["default_config"] = None
-    return update_state(change)["configs"]
+        state["configs"] = [c for c in state["configs"]
+                            if c.get("name") != name or c.get("role", "primary") != role]
+        settings = state["settings" if role == "primary" else "embeddings"]
+        if settings.get("default_config") == name:
+            settings["default_config"] = None
+    update_state(change)
+    return list_configs(role)
 
 
-def set_default_config(name: Optional[str]) -> dict:
+def set_default_config(name: Optional[str], role="primary") -> dict:
     """Set (or clear, with a falsy name) the auto-load default config.
 
     Raises ValueError if a non-empty name doesn't match a saved config.
     """
     name = (name or "").strip() or None
+    validate_role(role)
     def change(state):
-        if name is not None and not any(c.get("name") == name for c in state["configs"]):
+        if name is not None and not any(c.get("name") == name and c.get("role", "primary") == role for c in state["configs"]):
             raise ValueError(f"no such configuration: {name}")
-        state["settings"]["default_config"] = name
-    return update_state(change)["settings"]
+        state["settings" if role == "primary" else "embeddings"]["default_config"] = name
+    update_state(change)
+    return get_settings(role)

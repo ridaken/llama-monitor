@@ -4,12 +4,15 @@ services:
       context: .
       args:
         LLAMA_CPP_IMAGE: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
+    environment:
+      MONITOR_EMBEDDING_PUBLISHED_PORT: ${EMBEDDING_PORT:-8081}
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${DASHBOARD_PORT:-8500}:8500"
       - "${BIND_ADDRESS:-0.0.0.0}:${INFERENCE_PORT:-8001}:8001"
+      - "${BIND_ADDRESS:-0.0.0.0}:${EMBEDDING_PORT:-8081}:8081"
       - "${PROXY_BIND_ADDRESS:-${BIND_ADDRESS:-0.0.0.0}}:${PROXY_PORT:-8501}:8501"
     volumes:
       - monitor-data:/data

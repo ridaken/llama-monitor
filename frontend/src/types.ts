@@ -67,12 +67,33 @@ export type LauncherState = {
     models_dir: string | null
     default_port: number
     default_config: string | null
+    autostart_after_primary?: boolean
+    cpu_fallback?: boolean
     autostart_default_model: boolean
+  }
+  companion?: {
+    state: string
+    reason: string
+    mode: string
+    config?: Config | null
   }
   binary_valid: boolean
   configs: Config[]
   status: {
-    state: 'running' | 'stopped' | 'exited'
+    state:
+      | 'running'
+      | 'stopped'
+      | 'exited'
+      | 'waiting'
+      | 'loading'
+      | 'ready'
+      | 'cpu_retry'
+      | 'failed'
+    reason?: string
+    mode?: 'cpu' | 'configured'
+    pid?: number | null
+    operation_id?: string | null
+    run_id?: string | null
     config_name?: string | null
     config?: Config | null
     exit_code?: number
@@ -195,6 +216,8 @@ export type RuntimeInfo = {
   containerized: boolean
   models_dir: string | null
   managed_port: number | null
+  embedding_port?: number | null
+  embedding_published_port?: number | null
 }
 export type Activity = {
   id: string

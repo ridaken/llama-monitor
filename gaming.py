@@ -18,6 +18,7 @@ from processes import AuxiliaryServer, identity_matches
 
 class GamingCoordinator:
     def __init__(self, manager, *, auxiliary=None, apollo=None, clock=time.time, health=None):
+        self.lifecycle = None
         self.manager = manager
         self.auxiliary = auxiliary or AuxiliaryServer()
         self.apollo = apollo or ApolloClient()
@@ -88,13 +89,13 @@ class GamingCoordinator:
             if not registration:
                 binary = resolve_binary(store.get_settings().get("llama_server_path"))
                 registration = {"executable": binary, "port": 8081} if binary else None
-            if registration:
+            if registration or self.lifecycle:
                 auxiliary = self.auxiliary.snapshot(registration)
                 if auxiliary:
                     if primary and primary["pid"] == auxiliary["pid"]:
                         raise LaunchError("Embedding registration matches the primary model.")
                     snapshots.append(auxiliary)
-            return sorted(snapshots, key=lambda s: s["created_at"])
+            return sorted(snapshots, key=lambda s: s["id"] != "primary")
 
     def schedule_boot_models(self, boot_marker=None):
         """Queue once per Windows boot; backend restarts respect explicit Stop."""
@@ -105,12 +106,20 @@ class GamingCoordinator:
                 return
             queued = []
             if self.transition is None:
-                for snapshot in settings["models"]:
+                # An already-running companion must release its allocation before
+                # a missing primary is restored at boot.
+                boot_models = copy.deepcopy(settings["models"])
+                if self.lifecycle and any(s["id"] == "primary" for s in boot_models) and not self.manager.snapshot():
+                    companion = self.auxiliary.snapshot(store.load_state()["gaming"]["auxiliary"])
+                    if companion and companion.get("managed"):
+                        boot_models = [s for s in boot_models if s["id"] != "embeddings"] + [companion]
+                        self.lifecycle.stop_embeddings("boot_primary_priority")
+                for snapshot in sorted(boot_models, key=lambda s: s["id"] != "primary"):
                     if snapshot["id"] == "primary":
                         live = self.manager.snapshot()
                     else:
                         registration = store.load_state()["gaming"]["auxiliary"]
-                        live = self.auxiliary.snapshot(registration) if registration else None
+                        live = self.auxiliary.snapshot(registration) if registration or snapshot.get("managed") else None
                     if live:
                         continue
                     queued.append(copy.deepcopy(snapshot))
@@ -142,7 +151,7 @@ class GamingCoordinator:
             if settings.get("autostart_default_model") is not True:
                 return
             config = next((c for c in state["configs"]
-                           if c.get("name") == settings.get("default_config")), None)
+                           if c.get("name") == settings.get("default_config") and c.get("role", "primary") == "primary"), None)
             if not config or self.transition:
                 return
             try:
@@ -190,6 +199,8 @@ class GamingCoordinator:
             self.wake_event.clear()
 
     def launch(self, config=None):
+        if self.lifecycle:
+            return self.lifecycle.launch_primary(config)
         with self.lock:
             if self.transition:
                 raise LaunchError("AI launch is blocked while Moonlight switching or recovery is pending.")
@@ -208,8 +219,23 @@ class GamingCoordinator:
             if server_id not in ("primary", "embeddings"):
                 raise LaunchError("Unknown registered server.")
             entry = next((s for s in (self.transition or {}).get("servers", []) if s["id"] == server_id), None)
+            if self.lifecycle and self.transition:
+                # Persist cancellation before signaling. A shutdown error must
+                # not leave an automatic restoration queued behind explicit Stop.
+                for queued in self.transition["servers"]:
+                    if queued["id"] == server_id or (server_id == "primary" and queued.get("managed")):
+                        queued.update(status="cancelled", error=None)
+                self._save()
             if server_id == "primary":
-                self.manager.stop()
+                if self.lifecycle:
+                    self.lifecycle.stop_primary()
+                    for companion in (self.transition or {}).get("servers", []):
+                        if companion["id"] == "embeddings" and companion.get("managed"):
+                            companion.update(status="cancelled", live=None, error=None)
+                else:
+                    self.manager.stop()
+            elif self.lifecycle and (not entry or entry.get("managed")):
+                self.lifecycle.stop_embeddings()
             elif entry and (entry.get("live") or getattr(self.auxiliary, "proc", None)):
                 self.auxiliary.stop(entry.get("live"))
             if entry:
@@ -235,6 +261,8 @@ class GamingCoordinator:
             if not settings["enabled"]:
                 raise LaunchError("Moonlight integration is disabled.")
             self.generation += 1
+            if self.lifecycle:
+                self.lifecycle.suspend()
             if (self.transition is None or
                     (self.transition["phase"] == "failed"
                      and not any(s["status"] == "stop_failed" for s in self.transition["servers"]))):
@@ -244,13 +272,13 @@ class GamingCoordinator:
                     raise LaunchError("The recorded managed server could not be adopted; refusing to skip it.")
                 if primary:
                     snapshots.append(primary)
-                if settings["auxiliary"]:
+                if settings["auxiliary"] or self.lifecycle:
                     auxiliary = self.auxiliary.snapshot(settings["auxiliary"])
                     if auxiliary:
                         if primary and primary["pid"] == auxiliary["pid"]:
                             raise LaunchError("The primary and embedding registrations match the same process.")
                         snapshots.append(auxiliary)
-                snapshots.sort(key=lambda s: s["created_at"])
+                snapshots.sort(key=lambda s: s["id"] != "primary")
                 self.transition = {"phase": "stopping", "deadline": None,
                                    "prepared_until": self.clock() + 30,
                                    "servers": [{**s, "original": copy.deepcopy(s), "live": s,
@@ -266,7 +294,7 @@ class GamingCoordinator:
                     if entry["id"] == "primary":
                         self.manager.stop("gaming_suspension")
                     else:
-                        live = self.auxiliary.snapshot(settings["auxiliary"]) if settings["auxiliary"] else entry.get("live")
+                        live = self.auxiliary.snapshot(settings["auxiliary"]) if settings["auxiliary"] or entry.get("managed") else entry.get("live")
                         if live:
                             self.auxiliary.stop(live)
                     entry["live"] = None
@@ -308,6 +336,8 @@ class GamingCoordinator:
 
     def tick(self):
         with self.lock:
+            if self.stop_event.is_set():
+                return
             settings = store.load_state()["gaming"]
             epoch = self.generation
         if not settings["enabled"]:
@@ -325,7 +355,7 @@ class GamingCoordinator:
                     self.integration_error = str(exc) if isinstance(exc, ValueError) else "Cannot reach Apollo; AI restoration is on hold."
                 return
         with self.lock:
-            if epoch != self.generation:
+            if self.stop_event.is_set() or epoch != self.generation:
                 return  # An API result from before preparation is stale.
             self.connected = clients
             self.reconciled = True
@@ -365,7 +395,11 @@ class GamingCoordinator:
 
     def _restore_step(self, now):
         entries = self.transition["servers"]
+        entries.sort(key=lambda s: s["id"] != "primary")
         for entry in entries:
+            if entry["id"] == "embeddings" and any(
+                    s["id"] == "primary" and s["status"] not in ("ready", "cancelled") for s in entries):
+                break
             if entry["status"] in ("ready", "cancelled", "failed", "stop_failed"):
                 continue
             if entry["status"] in ("running", "stopped"):
@@ -398,6 +432,17 @@ class GamingCoordinator:
                             self.auxiliary.snapshot(store.load_state()["gaming"]["auxiliary"]))
                     if live and live["argv"] == entry["original"]["argv"]:
                         entry["live"] = live
+                if entry.get("managed") and entry["id"] == "embeddings" and self.lifecycle:
+                    op = self.lifecycle.operation or {}
+                    if op.get("state") == "cpu_retry":
+                        return
+                    if op.get("state") == "failed":
+                        self._load_failed(entry, op.get("reason", "Embedding load failed."))
+                        self._save()
+                        continue
+                    if op.get("state") == "loading":
+                        entry["load_deadline"] = op["deadline"]
+                    entry["live"] = self.auxiliary.snapshot(None)
                 live = entry.get("live")
                 if not live or not identity_matches(live):
                     self._load_failed(entry, "Server exited before becoming ready.")

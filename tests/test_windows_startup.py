@@ -81,6 +81,19 @@ def test_setup_success_applies_autostart_and_task_status(setup):
 
 
 @pytest.mark.skipif(startup.os.name != "nt", reason="Windows setup")
+def test_managed_boot_snapshot_never_creates_legacy_registration(setup):
+    controller, *_ = setup
+    controller.coordinator.capture_startup_models = lambda: [{
+        "id": "embeddings", "name": "Managed embeddings", "port": 8081,
+        "executable": "llama-server.exe", "managed": True}]
+    controller.setup()
+    pending = store.load_state()["startup"]["pending"]
+    controller.result_path().write_text(json.dumps({"operation": pending["operation"], "success": True}))
+    assert controller.state()["installed"]
+    assert store.load_state()["gaming"]["auxiliary"] is None
+
+
+@pytest.mark.skipif(startup.os.name != "nt", reason="Windows setup")
 def test_cancelled_windows_setup_does_not_change_existing_configuration(setup):
     controller, *_ = setup
     store.update_startup(installed=True, autostart_models=False)

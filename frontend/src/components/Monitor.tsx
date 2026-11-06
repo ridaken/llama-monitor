@@ -17,12 +17,13 @@ import {
 import { clamp, fmt, fmtGB } from '@/lib/utils'
 import type { Stats, Timing } from '@/types'
 import type { useMonitor } from '@/hooks/useMonitor'
+import { Embeddings } from '@/components/Embeddings'
 import { useMonitorFit } from '@/hooks/useMonitorFit'
 
 type MonitorData = ReturnType<typeof useMonitor>
 type MemoryEntry = NonNullable<Stats['split']>[number]
 const memoryNotes: Record<string, string> = {
-  nvml: 'Live llama-server VRAM measured by NVML. Teal is llama-server; orange is the rest of current device usage.',
+  nvml: 'Live primary model VRAM measured by NVML. Teal is llama-server; orange is the rest of current device usage.',
   log: 'Buffer sizes from the load log: weights, KV cache and work buffers. CPU includes mapped files and pinned RAM. These sizes are not live physical usage.',
   'nvml-delta':
     'Estimated change in VRAM since model load. Other apps can affect this value; it is not a measured process allocation.',
@@ -110,7 +111,7 @@ function ModelMemory({
   if (!entry) return null
   const label =
     source === 'nvml'
-      ? 'llama-server VRAM'
+      ? 'Primary model VRAM'
       : source === 'log'
         ? 'llama.cpp buffers · logged'
         : 'llama-server · estimate'
@@ -351,6 +352,7 @@ export function Monitor({
   }
   return (
     <TooltipProvider delayDuration={150}>
+      <Embeddings />
       <div ref={fitRef} className="monitor-layout">
         <div className="monitor-controls">
           <div className="surface subtle-grid monitor-feature monitor-hero relative overflow-hidden rounded-2xl p-6 sm:p-8">

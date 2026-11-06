@@ -67,7 +67,7 @@ except for the aggregation performed by `status` and additions from `--wait`.
 | `configs show NAME` | Returns one configuration matched by its exact name; missing names fail with exit 1. |
 | `launch (--config NAME \| --config-file PATH) [--wait] [--timeout SECONDS]` | Exactly one configuration source is required. Launches an existing saved configuration or unsaved JSON; `PATH=-` reads stdin. Replaces the currently managed model and returns launcher state. `--wait` adds a `readiness` result pinned to this launch. Wait timeout defaults to 300 seconds. Does not save the supplied configuration. |
 | `restart [--wait] [--timeout SECONDS]` | Restarts the manager's current launch configuration, including unsaved settings; fails if none is available or switching blocks it. Returns launcher state; optional readiness behaves like launch. Timeout defaults to 300 seconds. |
-| `stop` | Stops the managed primary server and cancels its pending restoration, if any. Returns launcher state. Does not stop an arbitrary external watch target. |
+| `stop` | Stops both managed models and cancels pending launches/restoration; use `--role embeddings` to stop only the companion. Returns launcher state. Does not stop an arbitrary external watch target. |
 | `wait (--backend \| --ready) [--timeout SECONDS]` | Exactly one condition is required. Backend mode returns health; ready mode returns readiness for the first observed managed run. Timeout defaults to 300 seconds. |
 | `smoke [--timeout SECONDS]` | Sends one short chat completion through the managed primary model. Returns `run_id`, `elapsed_seconds`, `message`, `finish_reason`, and `usage`. Default 60 seconds; positive finite maximum 300. Consumes inference resources and may create history. |
 | `test-prompt [--timeout SECONDS]` | Sends the same fixed Python FizzBuzz request as Monitor's **Test prompt** button. Uses the configured proxy when enabled, otherwise the current upstream directly, including external watch targets. Default 120 seconds; positive finite maximum 300. Returns route, target/model, reply, elapsed time, finish reason, optional usage and proxy request ID. Output limit is 2,048 tokens. An unavailable enabled proxy fails without direct fallback. |
@@ -258,3 +258,28 @@ TLS reverse proxy. Commands run inside the standard container need no override.
 API keys supplied with `--api-key-env NAME` must exist in that CLI process's
 environment. The smoke result does not prove durable capture: use the returned
 `request_id` with `requests show` and bounded polling until the record is terminal.
+
+## Embedding models
+
+Add `--role embeddings` to `status`, `launch`, `restart`, `stop`, `wait`,
+`configs list/show`, `logs`, or `smoke`. The default remains `--role primary`.
+Configuration files use backend paths; Docker mounts both models under `/models`.
+For example, after saving an embedding configuration through the dashboard:
+
+```sh
+python cli.py launch --role embeddings --config "Embeddings" --wait --timeout 660 --json
+python cli.py status --role embeddings --json
+python cli.py smoke --role embeddings --timeout 60 --json
+python cli.py logs --role embeddings --runs --json
+python cli.py stop --role embeddings --json
+```
+
+For Docker, prefix the commands with `docker compose exec -T monitor` as usual.
+Embedding starts can wait for a loading primary, or run standalone when primary
+is stopped. Wait pins an operation identity across queuing and an optional CPU
+retry, and fails if cancelled or replaced. `--timeout` is the caller's overall
+wait limit, independent of the backend's five-minute deadline per attempt;
+allow additional time if waiting for primary loading and CPU fallback.
+Embedding smoke verifies `/v1/embeddings` and reports vector dimensions.
+Primary `launch --wait` continues waiting only for primary readiness.
+Primary `stop` now stops both managed models and cancels queued companion work.

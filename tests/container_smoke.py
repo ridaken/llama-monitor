@@ -46,7 +46,7 @@ def main():
         Path(directory, "smoke.gguf").touch()
         env = {**os.environ, "MODELS_DIR": Path(directory).as_posix(),
                "BIND_ADDRESS": "127.0.0.1", "DASHBOARD_PORT": str(free_port()),
-               "INFERENCE_PORT": str(free_port()), "PROXY_PORT": str(free_port()), "PROXY_BIND_ADDRESS": ""}
+               "INFERENCE_PORT": str(free_port()), "PROXY_PORT": str(free_port()), "EMBEDDING_PORT": str(free_port()), "PROXY_BIND_ADDRESS": ""}
         env.pop("LLAMA_CPP_IMAGE", None)
         compose = ["docker", "compose", "-p", f"llama-monitor-smoke-{os.getpid()}", "-f", "compose.yaml"]
         if args.gpu:
@@ -56,8 +56,8 @@ def main():
             return subprocess.run([*compose, *command], cwd=ROOT, env=environment or env, check=True,
                                   text=True, stdout=subprocess.PIPE if capture else None).stdout
 
-        def request(path, body=None, inference=False, proxy=False):
-            port = env["PROXY_PORT" if proxy else "INFERENCE_PORT" if inference else "DASHBOARD_PORT"]
+        def request(path, body=None, inference=False, proxy=False, embedding=False):
+            port = env["EMBEDDING_PORT" if embedding else "PROXY_PORT" if proxy else "INFERENCE_PORT" if inference else "DASHBOARD_PORT"]
             req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
                 data=json.dumps(body).encode() if body is not None else None,
                 headers={"Content-Type": "application/json"})
@@ -89,7 +89,7 @@ def main():
                 config = json.loads(run("config", "--format", "json", capture=True,
                     environment={**env, "BIND_ADDRESS": bind, "PROXY_BIND_ADDRESS": proxy_bind}))
                 ports = {port["target"]: port["host_ip"] for port in config["services"]["monitor"]["ports"]}
-                assert ports == {8500: bind or "0.0.0.0", 8001: bind or "0.0.0.0", 8501: expected}, ports
+                assert ports == {8500: bind or "0.0.0.0", 8001: bind or "0.0.0.0", 8081: bind or "0.0.0.0", 8501: expected}, ports
             example_env = {key: value for key, value in env.items()
                            if key not in {"BIND_ADDRESS", "PROXY_BIND_ADDRESS"}}
             config = json.loads(run("--env-file", ".env.example", "config", "--format", "json",
@@ -203,6 +203,34 @@ def main():
                        input=json.dumps(config))["readiness"]["ready"]
             assert cli("restart", "--wait", "--timeout", "30")["readiness"]["ready"]
             eventually(lambda: request("/health", inference=True)["status"] == "ok")
+            restarted = cli("status")["readiness"]["run_id"]
+            # Both roles load from the same read-only /models mount.
+            embedding_config = {"name": "embedding", "model_path": "/models/smoke.gguf", "port": 8081, "flags": []}
+            request("/api/configs?role=embeddings", embedding_config)
+            request("/api/configs/default?role=embeddings", {"name": "embedding"})
+            assert cli("configs", "show", "embedding", "--role", "embeddings")["port"] == 8081
+            assert cli("launch", "--config", "embedding", "--role", "embeddings", "--wait", "--timeout", "30")["readiness"]["ready"]
+            assert cli("smoke", "--role", "embeddings")["dimensions"] == 3
+            assert request("/health", embedding=True)["status"] == "ok"
+            embedding_run = cli("status", "--role", "embeddings")["readiness"]["run_id"]
+            assert cli("logs", "--runs", "--role", "embeddings")["items"][0]["run_id"] == embedding_run
+            assert cli("logs", "--runs")["items"][0]["run_id"] == restarted
+            # Primary restart gives allocations priority and restores the companion.
+            cli("restart", "--wait", "--timeout", "30")
+            cli("wait", "--ready", "--role", "embeddings", "--timeout", "30")
+            assert cli("status", "--role", "embeddings")["readiness"]["run_id"] != embedding_run
+            cli("stop")
+            assert cli("status", "--role", "embeddings")["readiness"]["state"] == "stopped"
+            # Explicit standalone start, bounded fallback, and saved flags unchanged.
+            request("/api/launcher/settings?role=embeddings", {"cpu_fallback": True})
+            fallback = {**embedding_config, "flags": [{"flag": "--smoke-fail-gpu", "value": ""}]}
+            fallback_result = cli("launch", "--role", "embeddings", "--config-file", "-", "--wait", "--timeout", "30", input=json.dumps(fallback))
+            assert fallback_result["readiness"]["mode"] == "cpu"
+            assert cli("smoke", "--role", "embeddings")["dimensions"] == 3
+            cli("stop", "--role", "embeddings")
+            request("/api/launcher/settings?role=embeddings", {"cpu_fallback": False, "autostart_after_primary": True})
+            cli("launch", "--config", "smoke", "--wait", "--timeout", "30")
+            cli("wait", "--ready", "--role", "embeddings", "--timeout", "30")
             restarted = cli("status")["readiness"]["run_id"]
             cli("smoke", "--timeout", "10")
             # No stats/UI request: the new run must already be filterable by model.

@@ -219,6 +219,16 @@ export function Gaming() {
           {state?.auxiliary && (
             <p className="text-sm text-muted-foreground">
               Registered on port {state.auxiliary.port}
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-2"
+                onClick={() =>
+                  action('/api/gaming/auxiliary', { unregister: true })
+                }
+              >
+                Unregister
+              </Button>
             </p>
           )}
         </div>
