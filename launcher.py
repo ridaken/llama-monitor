@@ -233,6 +233,9 @@ class ServerManager:
             self.exit_code = None
             self._stopped_by_user = False
             self.run_id = rec["run_id"]
+            if getattr(self, "observability", None):
+                self.observability.event("launcher", "model_adopted", "Reattached to an existing managed model.",
+                                         role=self.role, run_id=self.run_id)
             captured = managed_logs.load(self.run_id)
             if captured.get("pid") == pid:
                 self._proc = log_capture.CapturedProcess(self.run_id, captured)
@@ -347,7 +350,7 @@ class ServerManager:
             self.run_id = uuid.uuid4().hex
             try:
                 self._proc = log_capture.launch(argv, cwd, self.run_id, config.get("name"),
-                                                **({"role": self.role} if self.role != "primary" else {}))
+                                                role=self.role, model_path=config.get("model_path"))
             except Exception as e:
                 self._proc = None
                 self.last_error = str(e)

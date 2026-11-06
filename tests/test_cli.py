@@ -10,6 +10,40 @@ import pytest
 import cli
 
 
+def test_application_log_and_metric_routes(invoke):
+    code, _, calls = invoke(["app-logs", "--role", "embeddings", "--level", "warning", "--component", "launcher",
+                             "--run", "run", "--since", "2h"], lambda _: {"items": []})
+    assert code == 0 and calls[0].url.path == "/api/observability/events"
+    params = calls[0].url.params
+    assert params["role"] == "embeddings" and params["run_id"] == "run" and params["level"] == "warning"
+    assert float(params["from_ts"]) > 0
+    code, _, calls = invoke(["app-stats", "--model", "key", "--since", "7d"], lambda _: {"available": True})
+    assert code == 0 and calls[0].url.path == "/api/observability/metrics"
+    assert calls[0].url.params["model"] == "key"
+    for arguments in (["app-logs", "--limit", "0"], ["app-stats", "--since", "bad"],
+                      ["app-stats", "--since", "1h", "--from-ts", "1"]):
+        code, _, calls = invoke(arguments, lambda _: pytest.fail("no request"))
+        assert code == 2 and not calls
+
+
+def test_log_follow_uses_forward_cursor_and_json_lines(monkeypatch, capsys):
+    real_client = httpx.Client
+    calls = []
+    def dispatch(request):
+        calls.append(request)
+        return httpx.Response(200, json={"items": [], "next_cursor": str(len(calls)), "gap": False})
+    monkeypatch.setattr(cli.httpx, "Client", lambda **kwargs: real_client(**kwargs, transport=httpx.MockTransport(dispatch)))
+    def sleep(_):
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+    monkeypatch.setattr(cli.time, "sleep", sleep)
+    assert cli.main(["app-logs", "--follow", "--json"]) == 130
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(lines) == 3 and lines[-1]["error"]["code"] == 130
+    assert calls[0].url.params["direction"] == "forward"
+    assert calls[1].url.params["cursor"] == "1"
+
+
 def test_retained_log_cli_routes(invoke):
     code, output, calls = invoke(["logs", "--runs", "--limit", "10"], lambda _: {"items": [], "next_cursor": None})
     assert code == 0 and output["data"]["items"] == []

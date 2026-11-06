@@ -225,7 +225,7 @@ def fake_popen(monkeypatch):
         return launcher.same_identity(record, current)
 
     monkeypatch.setattr(launcher.subprocess, "Popen", _popen)
-    monkeypatch.setattr(launcher.log_capture, "launch", lambda argv, cwd, run_id, name: _popen(
+    monkeypatch.setattr(launcher.log_capture, "launch", lambda argv, cwd, run_id, name, **kwargs: _popen(
         argv, cwd=cwd, creationflags=launcher._DETACH_FLAGS, **launcher._DETACH_KW))
     # Help parsing has its own tests; subprocess.run would also use fake Popen
     # and replace the captured model process while preparing a restart.

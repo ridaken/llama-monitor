@@ -225,6 +225,20 @@ def test_run_listing_pagination_and_cursor_validation(isolated):
         logs.console(second.run_id, "not-a-cursor")
 
 
+def test_reconciliation_does_not_overwrite_exit_published_during_identity_probe(isolated, monkeypatch):
+    capture = writer()
+    capture.record.update(state="running", supervisor_identity={"pid": 1}, identity={"pid": 2})
+    capture.publish()
+    def finished_during_probe(_):
+        capture.finish(7, "restart")
+        return False
+    monkeypatch.setattr("processes.identity_matches", finished_during_probe)
+    logs.reconcile()
+    record = logs.load(capture.run_id)
+    assert record["state"] == "exited" and record["exit_code"] == 7
+    assert record["stop_reason"] == "restart"
+
+
 def test_real_capture_preserves_exit_and_trailing_output(isolated):
     selected = uuid.uuid4().hex
     handle = log_capture.launch([sys.executable, "-u", "-c",
@@ -251,6 +265,18 @@ def test_capture_and_inference_survive_backend_exit(isolated):
         time.sleep(0.02)
     assert logs.load(selected)["exit_code"] == 0
     assert "survived backend exit" in logs.console(selected)["content"]
+    # SQLite tracking is owned by the surviving supervisor, not the backend.
+    from observability import Storage
+    storage = Storage(str(isolated / "history.sqlite"))
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        metrics = storage.metrics(run_id=selected)
+        if metrics["available"] and metrics["sessions"][0].get("active") is False:
+            break
+        time.sleep(.02)
+    assert metrics["available"]
+    assert metrics["sessions"][0]["active"] is False
+    assert metrics["totals"]["process_uptime_seconds"] > .3
 
 
 def test_stop_intent_is_durable_and_actual_pid_is_signalled(isolated):

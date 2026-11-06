@@ -369,6 +369,79 @@ not restart the current backend. Model loading is once per boot and yields to
 existing servers and gaming recovery; see [Windows startup](../README.md#automatic-windows-startup-native-installation).
 
 
+## Application observability
+
+These read-only routes use the dashboard port and share `history.sqlite` with
+request history, using independent tables and retention. No external monitored
+server usage is included. Each API works without dashboard polling.
+
+| Route | Query parameters | Response |
+| --- | --- | --- |
+| `GET /api/observability/events` | `level=info\|warning\|error` (minimum severity), `component`, normalized-path `model`, `role=primary\|embeddings`, `run_id`, `from_ts`, `to_ts`, `cursor`, `limit` (1–200, default 50), `direction=backward\|forward` (default backward) | `{items, next_cursor, has_more, gap}`. Entries have insertion ID, stable event UUID, Unix timestamp, level, component, event code, message, and allowlisted context. |
+| `GET /api/observability/metrics` | `model`, `role`, `run_id`, `from_ts`, `to_ts` | `{available, from_ts, to_ts, as_of, totals, models, daily, sessions, coverage, units, definitions, retention, health}`. An unavailable/expired run returns `{available:false, reason, run_id}` plus health. |
+| `GET /api/observability/status` | None | `{health, retention}` with queue drops, write failures, last persistence, estimated retained bytes, retention boundaries/pruning counts, and active producer checkpoints. |
+
+Date bounds are Unix seconds, nonnegative and finite, with inclusive lower and
+exclusive upper bounds. Metrics default to UTC midnight through the current
+time; events default to all retained entries through the current time. Invalid
+filters/cursors/bounds return 400; typed malformed query values return 422;
+unavailable observability storage returns 503 while existing app routes continue
+to work. `status` can report initialization failure with `health.available=false`.
+
+Backward event pages are newest insertion first. Forward pages are oldest first,
+always include a continuation cursor even when empty, and support polling with
+an open upper bound. Cursors are tied to filters/direction; keep those parameters
+unchanged. `gap:true` means earlier entries have been evicted. IDs are insertion
+order, so delayed events can carry earlier timestamps.
+
+Metrics are measured in seconds, counters in counts, and utilization as a
+fraction or null without known busy/idle time. Definitions accompany every
+available report. `models` groups totals by normalized model path and role;
+unfiltered totals sum model time across runs/roles, rather than measuring shared
+machine busy time. `process_uptime_seconds` includes mutually exclusive loading,
+busy, idle, and unknown time; stop latency overlaps that lifetime. `load_seconds`
+ends at the first recognized ready log marker, independently of verified HTTP
+readiness. Counts include launch attempts, log-ready outcomes, pre-ready failures,
+unexpected exits, restart attempts, stop failures, CPU fallback attempts/outcomes,
+restoration operations/failures, and interruptions where observed.
+
+`sessions` describes retained backend/model instances, including role, model
+identity/display name, configuration label, latest checkpoint, outcome, and
+timestamped operation measurements. Operation-only records contribute counters,
+not uptime. Model identity is the normalized absolute model path; configuration
+renames do not change it and replacing a file at that path reuses it. Both roles
+are included unless filtered. An app session has no model/role, so model/role
+filters exclude backend-only uptime and operations.
+
+Reports include daily per-producer/model/role buckets with UTC `day`/`end`, values,
+granularity, and `partial_overlap`. Detailed intervals allow exact range clipping
+while retained. Before the reported detail boundary, totals include only complete
+daily buckets inside the requested range; partial buckets are listed with their
+full values and excluded from totals. Coverage explicitly flags that exclusion.
+Use session `as_of` and recording health to assess freshness; report `as_of` is
+query time. Daily summaries survive detail eviction but are not lifetime totals
+after their own retention expires. Run filters require retained model-session
+detail, even if some daily data still exists.
+
+Checkpoint transactions atomically replace cumulative daily snapshots and append
+interval detail. Duplicate checkpoints do not increment totals. A producer crash
+retains the last successful checkpoint and reports `unobserved_after` rather than
+inventing an exit timestamp. Wall-clock adjustments produce diagnostic events;
+elapsed durations use monotonic time. Clock discontinuities can affect placement
+on the wall-clock timeline.
+
+Observability keeps approximately 50 MiB of estimated row data and overhead,
+pruning to approximately 45 MiB. It removes events, interval/session detail, then
+old complete daily buckets; active checkpoints and the current UTC daily bucket
+are protected. Temporary excess is possible if protected state fills the budget.
+No whole-database vacuum or request-history deletion occurs. Individual events
+are bounded to 8 KiB. The whole database/WAL may be larger than this budget.
+Checkpoints occur every five seconds and on transitions; writes use bounded
+queues, short lock waits, and bounded retries. Queue/write loss is exposed through
+health, and lost interval detail advances the coarse-coverage boundary when
+persistence recovers. Existing supervisors need relaunch after upgrade, and no
+past usage is reconstructed from diagnostic logs.
+
 ## Proxy and captured requests
 
 These controls are on the dashboard port. The optional inference listener defaults

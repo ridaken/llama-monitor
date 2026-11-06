@@ -104,6 +104,9 @@ def main():
             if args.gpu:
                 assert report["checks"][1]["state"] == "pass"
             assert cli("status")["readiness"]["state"] == "stopped"
+            eventually(lambda: any(e["code"] == "ready" and e["component"] == "backend"
+                                   for e in cli("app-logs")["items"]))
+            assert cli("app-stats")["available"]
             cli("wait", "--ready", expected=1)
             cli("smoke", expected=1)
             cli("launch", expected=2)
@@ -181,6 +184,8 @@ def main():
             assert cli("requests", "list")["items"] == []
             assert cli("activity", "list", "--source", "monitored")["items"]
             assert cli("proxy", "settings", "--enabled", "off")["listening"] is False
+            eventually(lambda: cli("app-stats", "--run", run_id)["totals"].get("busy_seconds", 0) > 0)
+            eventually(lambda: cli("app-stats", "--run", run_id)["totals"].get("idle_seconds", 0) > 0)
             assert request("/health", inference=True)["status"] == "ok"
             assert cli("stats")["runtime"]["containerized"]
             eventually(lambda: cli("stats")["layer_placement"]["status"] == "available")
@@ -213,6 +218,9 @@ def main():
             assert cli("smoke", "--role", "embeddings")["dimensions"] == 3
             assert request("/health", embedding=True)["status"] == "ok"
             embedding_run = cli("status", "--role", "embeddings")["readiness"]["run_id"]
+            eventually(lambda: cli("app-stats", "--run", embedding_run)["available"])
+            assert cli("app-stats", "--run", embedding_run)["sessions"][0]["role"] == "embeddings"
+            eventually(lambda: cli("app-stats", "--run", restarted)["totals"].get("ready_outcomes") == 1)
             assert cli("logs", "--runs", "--role", "embeddings")["items"][0]["run_id"] == embedding_run
             assert cli("logs", "--runs")["items"][0]["run_id"] == restarted
             # Primary restart gives allocations priority and restores the companion.
@@ -242,6 +250,7 @@ def main():
             run("up", "--wait", "--wait-timeout", "60", "-d")
             assert exec_python("from pathlib import Path; print(Path('/data/smoke-stopped').read_text())") == "graceful"
             assert cli("status")["launcher"]["status"]["state"] == "stopped"
+            assert cli("app-stats", "--since", "7d")["daily"]
             # Opt-in startup must work without a browser or a manual launch.
             request("/api/configs/default", {"name": "smoke"})
             request("/api/launcher/settings", {"autostart_default_model": True})
