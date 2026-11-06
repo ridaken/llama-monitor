@@ -60,6 +60,35 @@ def test_launcher_state_shape(client):
     assert body["autostart_error"] is None
 
 
+def test_application_observability_routes(client):
+    import time
+    recorder = client.app.state.observability
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        body = client.get("/api/observability/events").json()
+        if any(item["code"] == "ready" for item in body["items"]):
+            break
+        time.sleep(.02)
+    assert any(item["code"] == "ready" for item in body["items"])
+    assert client.get("/api/observability/status").json()["health"]["available"]
+    metrics = client.get("/api/observability/metrics").json()
+    assert metrics["available"] and metrics["definitions"]["load_seconds"]
+    assert client.get("/api/observability/metrics?run_id=expired").json()["available"] is False
+    for query in ("limit=0", "level=debug", "role=invalid", "from_ts=5&to_ts=1", "cursor=broken"):
+        assert client.get("/api/observability/events?" + query).status_code == 400
+    client.post("/api/configs", json={"name": "observable", "model_path": "model.gguf", "port": 8001})
+    assert recorder.health()["queue_drops"] == 0
+
+
+def test_observability_failure_does_not_disable_existing_routes(client, monkeypatch):
+    recorder = client.app.state.observability
+    monkeypatch.setattr(recorder, "storage", None)
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/history").status_code == 200
+    assert client.get("/api/observability/events").status_code == 503
+    assert client.get("/api/observability/metrics").status_code == 503
+
+
 def test_embedding_role_configs_settings_and_logs_are_isolated(client):
     primary = {"name": "same", "model_path": "/models/primary.gguf", "port": 8001}
     embedding = {"name": "same", "model_path": "/models/embed.gguf", "port": 8081}

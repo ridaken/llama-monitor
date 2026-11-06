@@ -23,6 +23,9 @@ import json
 import secrets
 import logging
 import logging.config
+import time
+import uuid
+import observability
 import managed_logs
 import string
 from contextlib import asynccontextmanager
@@ -103,6 +106,36 @@ def validate_test_directory():
 
 
 def build_app(args) -> FastAPI:
+    if getattr(args, "test_mode", False):
+        validate_test_directory()
+    recorder = observability.Recorder(autostart=False)
+    tracker = None
+    try:
+        from log_capture import identity
+        try:
+            process_identity = identity(os.getpid())
+        except Exception:
+            process_identity = None
+        tracker = observability.Tracker(recorder, uuid.uuid4().hex, kind="app", identity=process_identity)
+        recorder.context = {"app_session_id": tracker.data["id"]}
+        recorder.event("backend", "starting", "Backend initialization started.", app_session_id=tracker.data["id"])
+        if recorder.storage:
+            try:
+                observability.reconcile(recorder.storage)
+            except Exception as exc:
+                recorder._failure(exc)
+        return _build_app(args, recorder, tracker)
+    except Exception as exc:
+        recorder.event("backend", "initialization_failed", "Backend initialization failed.", "error",
+                       exception_type=type(exc).__name__)
+        if tracker:
+            tracker.finish("initialization_failed")
+        recorder.start()
+        recorder.close()
+        raise
+
+
+def _build_app(args, recorder, app_tracker) -> FastAPI:
     test_mode = getattr(args, "test_mode", False)
     if test_mode:
         validate_test_directory()
@@ -114,6 +147,7 @@ def build_app(args) -> FastAPI:
     db = HistoryDB(os.path.join(store.HOME_DIR, "history.sqlite"))
     follower = LogFollower(db, args.llama_log,
                            prompt_dir=getattr(args, "llama_prompts_dir", None))
+    follower.observability = recorder
     rt = {
         "llama": LlamaCollector(args.llama_url),
         "log_path": args.llama_log,
@@ -151,6 +185,7 @@ def build_app(args) -> FastAPI:
             pass
 
     manager = ServerManager(retarget, finish_log=follower.finish_segment)
+    manager.observability = recorder
     managed_logs.reconcile()
 
     # If a previous dashboard run launched a server that's still alive, re-adopt
@@ -174,17 +209,21 @@ def build_app(args) -> FastAPI:
                      adopted.get("log_path") or store.MANAGED_LOG, a_port)
 
     embeddings = ServerManager(lambda *args: None, role="embeddings")
+    embeddings.observability = recorder
     if runtime.containerized() or test_mode:
         store.set_running(None, "embeddings")
         store.update_state(lambda state: state["embeddings"].update(operation=None))
     else:
         embeddings.adopt()
     gaming = GamingCoordinator(manager)
+    gaming.observability = recorder
     lifecycle = ModelLifecycle(manager, embeddings, gaming,
                                reserved_ports=(getattr(args, "port", 8500), getattr(args, "proxy_port", 8501)))
+    lifecycle.observability = recorder
     if test_mode:
         gaming.transition = None
     windows_startup = WindowsStartup(gaming, getattr(args, "port", 8500), test_mode=test_mode)
+    windows_startup.observability = recorder
     if not test_mode:
         gaming.startup_results = windows_startup.consume_result
     verification = ManagedVerification(manager, gaming)
@@ -203,37 +242,116 @@ def build_app(args) -> FastAPI:
 
     proxy = Proxy(db, proxy_target, host=getattr(args, "proxy_host", None) or getattr(args, "host", "127.0.0.1"),
                   port=getattr(args, "proxy_port", 8501), dashboard_port=getattr(args, "port", 8500))
+    proxy.observability = recorder
     inference_test = InferenceTest(verification, proxy)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        follower.start()
-        await proxy.start()
-        if not runtime.containerized() and not test_mode:
-            await asyncio.to_thread(gaming.start, autostart_default=not cli_target_explicit)
-        elif not test_mode and not cli_target_explicit:
-            await asyncio.to_thread(gaming.start_default_model)
-        lifecycle.start()
-        # Native launches outlive the backend; container launches stop with it.
+        outcome = "startup_failed"
         try:
+            recorder.start()
+            follower.start()
+            await proxy.start()
+            if not runtime.containerized() and not test_mode:
+                await asyncio.to_thread(gaming.start, autostart_default=not cli_target_explicit)
+            elif not test_mode and not cli_target_explicit:
+                await asyncio.to_thread(gaming.start_default_model)
+            recorder.condition("startup", "autostart_failed", bool(gaming.autostart_error))
+            lifecycle.start()
+            app_tracker.point("initialization_seconds", max(0, time.monotonic() - getattr(args, "initialization_started", app_tracker.started)))
+            app_tracker.checkpoint()
+            recorder.event("backend", "ready", "Backend initialization completed.", app_session_id=app_tracker.data["id"])
+            outcome = "lifespan_failed"
             yield
+            outcome = "graceful_shutdown"
+        except Exception as exc:
+            recorder.event("backend", "lifespan_failed", "Backend startup or lifespan failed.", "error",
+                           exception_type=type(exc).__name__)
+            raise
         finally:
-            await proxy.close()
-            lifecycle.close()
-            gaming.close()
             try:
-                if runtime.containerized() or test_mode:
-                    try:
-                        lifecycle.stop_embeddings("test_shutdown" if test_mode else "container_shutdown")
-                    finally:
-                        manager.stop(reason="test_shutdown" if test_mode else "container_shutdown")
+                await proxy.close()
+                lifecycle.close()
+                gaming.close()
+                try:
+                    if runtime.containerized() or test_mode:
+                        try:
+                            lifecycle.stop_embeddings("test_shutdown" if test_mode else "container_shutdown")
+                        finally:
+                            manager.stop(reason="test_shutdown" if test_mode else "container_shutdown")
+                finally:
+                    follower.stop()
+                    rt["llama"].close()
+                    gpu.shutdown()
+            except Exception:
+                outcome = "shutdown_failed"
+                raise
             finally:
-                follower.stop()
-                rt["llama"].close()
-                gpu.shutdown()
+                app_tracker.finish(outcome)
+                recorder.event("backend", "stopped", "Backend shutdown completed.", app_session_id=app_tracker.data["id"])
+                await asyncio.to_thread(recorder.close)
 
     app = FastAPI(title="llama-monitor", lifespan=lifespan)
     app.state.proxy = proxy
+    app.state.observability = recorder
+
+    @app.middleware("http")
+    async def record_control_operations(request, call_next):
+        component = request.url.path.split("/")[2:3]
+        component = component[0] if component else "backend"
+        if component not in ("launcher", "gaming", "startup", "proxy", "configs", "history", "requests", "inference"):
+            component = "backend"
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            recorder.event("backend", "request_failed", "Backend request failed unexpectedly.", "error",
+                           exception_type=type(exc).__name__)
+            raise
+        if request.method in ("POST", "DELETE") and request.url.path.startswith("/api/"):
+            route = getattr(request.scope.get("route"), "path", "/api/unknown")
+            code = route.removeprefix("/api/").replace("/", ".").replace("{", "").replace("}", "")
+            recorder.event(component, code + (".completed" if response.status_code < 400 else ".failed"),
+                           "Application control operation completed." if response.status_code < 400 else "Application control operation failed.",
+                           "info" if response.status_code < 400 else "warning")
+            if request.url.path == "/api/launcher/restart":
+                role = request.query_params.get("role", "primary")
+                config = (embeddings.current if role == "embeddings" else manager.current) or {}
+                recorder.measure("restart_attempts", model=observability.model_key(config.get("model_path")), role=role)
+        return response
+
+    @app.get("/api/observability/status")
+    def observability_status():
+        try:
+            return {"health": recorder.health(), "retention": recorder.storage.status() if recorder.storage else None}
+        except Exception:
+            return JSONResponse({"error": "Observability storage unavailable.", "health": recorder.health()}, status_code=503)
+
+    @app.get("/api/observability/events")
+    def observability_events(level: str = "info", component: str = "", model: str = "", role: str = "",
+                             run_id: str = "", from_ts: float | None = None, to_ts: float | None = None,
+                             cursor: str | None = None, limit: int = 50, direction: str = "backward"):
+        try:
+            if not recorder.storage:
+                return JSONResponse({"error": "Observability storage unavailable."}, status_code=503)
+            return recorder.storage.events(level=level, component=component, model=model, role=role, run_id=run_id,
+                                           from_ts=from_ts, to_ts=to_ts, cursor=cursor, limit=limit, direction=direction)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception:
+            return JSONResponse({"error": "Observability storage unavailable."}, status_code=503)
+
+    @app.get("/api/observability/metrics")
+    def observability_metrics(model: str = "", role: str = "", run_id: str = "",
+                              from_ts: float | None = None, to_ts: float | None = None):
+        try:
+            if not recorder.storage:
+                return JSONResponse({"error": "Observability storage unavailable."}, status_code=503)
+            return {**recorder.storage.metrics(model=model, role=role, run_id=run_id, from_ts=from_ts, to_ts=to_ts),
+                    "health": recorder.health()}
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception:
+            return JSONResponse({"error": "Observability storage unavailable."}, status_code=503)
 
     @app.post("/api/inference/test")
     async def test_prompt(body: TestPromptRequest):
@@ -936,6 +1054,7 @@ def build_app(args) -> FastAPI:
 
 
 def main() -> None:
+    initialization_started = time.monotonic()
     p = argparse.ArgumentParser(description="llama-server live monitor")
     p.add_argument(
         "--llama-url",
@@ -965,6 +1084,7 @@ def main() -> None:
     p.add_argument("--background", action="store_true", help="Run without a console and log to ~/.llama-monitor/backend.log")
     p.add_argument("--test-mode", action="store_true", help="Use isolated data, disable integration automation, and stop test models on exit")
     args = p.parse_args()
+    args.initialization_started = initialization_started
     if not 1 <= args.proxy_port <= 65535:
         p.error("--proxy-port must be between 1 and 65535")
     if args.test_mode:

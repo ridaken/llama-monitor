@@ -532,10 +532,14 @@ class LogFollower:
         while not self.stop_event.is_set():
             try:
                 self.poll()
+                if getattr(self, "observability", None):
+                    self.observability.condition("history", "ingestion_failed", False)
             except Exception as exc:
                 with self.lock:
                     self.error = str(exc)
                     self.available = False
+                if getattr(self, "observability", None):
+                    self.observability.condition("history", "ingestion_failed", True)
             self.stop_event.wait(1.0)
 
     def snapshot(self) -> dict:

@@ -195,6 +195,45 @@ if ($page.data.next_cursor) {
 }
 ```
 
+## Application observability
+
+```sh
+python cli.py app-logs --level warning --since 2h --json
+python cli.py app-logs --component launcher --run RUN_ID --json
+python cli.py app-logs --follow --json
+python cli.py app-stats --role embeddings --since 7d --json
+python cli.py app-stats --model MODEL_KEY --run RUN_ID --json
+```
+
+Both commands support existing `--url`, `--request-timeout`, `--json`, and optional
+`--role`. Without a role filter, both managed roles are included. `--model` is the
+normalized absolute path reported by metrics, rather than a configuration label.
+`--run` filters an exact managed run; an expired/unknown metric run returns
+`available:false` with exit 0, so callers must inspect availability and coverage.
+The CLI never opens SQLite directly.
+
+`--since` accepts a positive duration suffixed with `s`, `m`, `h`, or `d`; fractional
+values are accepted. It cannot be combined with `--from-ts`. Both commands accept
+`--from-ts` and `--to-ts` Unix seconds. Metrics default to the current UTC day;
+logs default to all retained history. Date/model filters do not change retention.
+
+`app-logs` additionally supports minimum `--level info|warning|error`,
+`--component`, `--limit` (1–200), `--cursor`, and `--follow`. Ordinary output is
+newest insertion first. Follow mode reads retained history oldest first, then
+polls once per second using a forward cursor; use `--since` to limit its initial
+history. It reports retention gaps. JSON follow output is newline-delimited,
+with one `{ok:true,data:...}` envelope per batch, including empty batches.
+Transport errors end following using normal CLI exit codes. Ctrl+C exits 130 and
+emits the normal interruption error envelope. It creates no inference requests.
+
+`app-stats` returns totals, daily buckets, retained sessions, definitions,
+coverage, retention information, and recording health. Missing coverage is not
+idle time. Expired detail is available only at UTC daily granularity; partially
+intersecting coarse buckets are explicitly excluded from exact range totals.
+See [the API contract](api.md#application-observability) for metric definitions,
+freshness, bounded storage, and upgrade behavior. There is no new clear command;
+automatic retention is independent of request-history clear actions.
+
 ## Output and exit codes
 
 JSON success contains `ok` and `data`. Handled errors contain `ok: false` and an

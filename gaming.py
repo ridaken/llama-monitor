@@ -53,6 +53,24 @@ class GamingCoordinator:
 
     def _save(self):
         store.update_gaming(transition=copy.deepcopy(self.transition))
+        recorder = getattr(self, "observability", None)
+        if recorder:
+            transition = self.transition or {}
+            phase = transition.get("phase", "idle")
+            signature = (phase, tuple((s["id"], s["status"], s.get("attempts", 0)) for s in transition.get("servers", [])))
+            if signature != getattr(self, "_observed_transition", None):
+                recorder.event("gaming", "transition", "Gaming coordination state changed.",
+                               "warning" if phase == "failed" else "info", state=phase)
+                self._observed_transition = signature
+            started = getattr(self, "_restoration_started", None)
+            if phase == "restoring" and started is None:
+                self._restoration_started = time.monotonic()
+            elif started is not None and phase != "restoring":
+                recorder.measure("restoration_seconds", max(0, time.monotonic() - started))
+                recorder.measure("restoration_operations")
+                if phase in ("failed", "retry_countdown"):
+                    recorder.measure("restoration_failures")
+                self._restoration_started = None
 
     def state(self):
         with self.lock:
@@ -191,10 +209,14 @@ class GamingCoordinator:
                 if self.startup_results:
                     self.startup_results()
                 self.tick()
+                if getattr(self, "observability", None):
+                    self.observability.condition("gaming", "coordination_failed", bool(self.integration_error))
             except Exception:
                 # Avoid printing credentials or invocation arguments in errors.
                 with self.lock:
                     self.integration_error = "Switching encountered an error; check registered process access."
+                if getattr(self, "observability", None):
+                    self.observability.condition("gaming", "coordination_failed", True)
             self.wake_event.wait(2)
             self.wake_event.clear()
 

@@ -11,6 +11,7 @@ import queue
 import threading
 
 import managed_logs as logs
+import observability
 from processes import capture_process, identity_matches
 
 
@@ -72,14 +73,16 @@ class CapturedProcess:
         self._signal(True)
 
 
-def launch(argv, cwd, run_id, config_name, *, role="primary"):
+def launch(argv, cwd, run_id, config_name, *, role="primary", model_path=None):
     logs.run_dir(run_id).mkdir(parents=True, exist_ok=True)
     supervisor = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), run_id], stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detached())
     try:
         supervisor.stdin.write(json.dumps({"argv": argv, "cwd": cwd, "name": config_name,
-                                          "role": role, "managed_log": str(logs.store.MANAGED_LOG)}).encode())
+                                          "role": role, "model_path": model_path,
+                                          "managed_log": str(logs.store.MANAGED_LOG),
+                                          "observability_db": os.path.join(logs.store.HOME_DIR, "history.sqlite")}).encode())
         supervisor.stdin.close()
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -107,6 +110,10 @@ def supervise(run_id):
     writer.record["supervisor_identity"] = identity(os.getpid())
     writer.publish()
     child = None
+    recorder = observability.Recorder(payload.get("observability_db"))
+    recorder.context = {"run_id": run_id, "role": payload.get("role", "primary"),
+                        "model": observability.model_key(payload.get("model_path"))}
+    tracker = None
     try:
         if (writer.directory / "cancel").exists():
             writer.finish(None, "launch_cancelled")
@@ -114,8 +121,16 @@ def supervise(run_id):
         # File logging is monitor-owned: suppress that sink for both new and
         # restored legacy invocations. stdout/stderr provide the single stream.
         argv = list(payload["argv"])
+        recorder.measure("launch_attempts", model=observability.model_key(payload.get("model_path")),
+                         role=payload.get("role", "primary"), run_id=run_id)
         child = subprocess.Popen(argv, cwd=payload.get("cwd"), stdin=subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **detached())
+        tracker = observability.Tracker(recorder, run_id, model=observability.model_key(payload.get("model_path")),
+                                        role=payload.get("role", "primary"), config_name=payload.get("name") or "",
+                                        identity=writer.record["supervisor_identity"])
+        writer.observer = tracker
+        recorder.event("launcher", "model_spawned", "Managed model process started.",
+                       model=tracker.data["model"], role=tracker.data["role"], run_id=run_id)
         try:
             actual = identity(child.pid)
         except Exception:
@@ -140,6 +155,8 @@ def supervise(run_id):
             except (OSError, ValueError):
                 intent = None
             if intent and intent != last_intent:
+                tracker.stop_intent(failed=bool(intent.get("failed")), forced=bool(intent.get("forced")),
+                                    requested_at=intent.get("monotonic_at"))
                 writer.record["stop_reason"] = intent["reason"]
                 writer.event(f"Stop requested: {intent['reason']}."
                              + (" Escalating to forced termination." if intent.get("forced") else "")
@@ -157,14 +174,23 @@ def supervise(run_id):
             raw, truncated = line
             try:
                 writer.feed(raw.decode("utf-8", "replace"))
+                recorder.condition("observability", "activity_parse_failed", False)
                 if truncated:
+                    tracker.gap()
                     writer.event("Oversized log line truncated.")
             except Exception as exc:
                 # A broken disk or parser must never leave the inference pipe full.
                 writer.fail(f"Log capture failed: {exc}")
+                tracker.gap()
+                recorder.condition("observability", "activity_parse_failed", True)
                 writer.publish()
         child.wait()
         writer.finish(child.returncode)
+        tracker.finish(writer.record["stop_reason"], child.returncode)
+        recorder.event("launcher", "model_exited", "Managed model process exited.",
+                       "warning" if writer.record["stop_reason"] == "unexpected_exit" else "info",
+                       run_id=run_id, model=tracker.data["model"], role=tracker.data["role"],
+                       exit_code=child.returncode, reason=writer.record["stop_reason"])
     except Exception as exc:
         writer.record["launch_error"] = str(exc)
         if child is not None and child.poll() is None:
@@ -175,6 +201,15 @@ def supervise(run_id):
                 child.kill()
                 child.wait()
         writer.finish(child.returncode if child else None, "launch_failed")
+        if tracker:
+            tracker.finish("launch_failed", child.returncode if child else None)
+        else:
+            recorder.measure("pre_ready_failures", model=observability.model_key(payload.get("model_path")),
+                             role=payload.get("role", "primary"), run_id=run_id)
+        recorder.event("launcher", "launch_failed", "Managed process launch or capture failed.", "error",
+                       run_id=run_id, role=payload.get("role", "primary"), exception_type=type(exc).__name__)
+    finally:
+        recorder.close()
 
 
 if __name__ == "__main__":
