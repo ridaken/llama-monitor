@@ -54,10 +54,10 @@ export function LauncherFeedback({
     <p
       id={
         target === 'configuration'
-          ? 'lx-msg'
+          ? `${launcher.role === 'embeddings' ? 'ex' : 'lx'}-msg`
           : target === 'launch'
-            ? 'lx-launch-msg'
-            : 'lx-bin-status'
+            ? `${launcher.role === 'embeddings' ? 'ex' : 'lx'}-launch-msg`
+            : `${launcher.role === 'embeddings' ? 'ex' : 'lx'}-bin-status`
       }
       role="status"
       className={`launcher-feedback text-xs ${message.bad ? 'text-red-300' : 'text-teal-300'}`}
@@ -71,7 +71,7 @@ export function LaunchStatus({ launcher }: { launcher: LauncherController }) {
   const { status, statusText } = launcher
   return (
     <Badge
-      id="lx-status"
+      id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-status`}
       variant="outline"
       className={`max-w-full break-all whitespace-normal text-xs ${status === 'running' ? 'border-teal-700/60 bg-teal-950/30 text-teal-300' : status === 'exited' ? 'border-amber-700 text-amber-300' : 'text-muted-foreground'}`}
     >
@@ -99,7 +99,7 @@ export function LaunchControls({
     <div className="launch-controls space-y-3">
       <div className="flex flex-wrap gap-2">
         <Button
-          id="lx-launch"
+          id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-launch`}
           disabled={!state?.binary_valid || gamingBlocked}
           onClick={() => launchAction('launch')}
         >
@@ -107,16 +107,21 @@ export function LaunchControls({
           Launch
         </Button>
         <Button
-          id="lx-stop"
+          id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-stop`}
           variant="secondary"
-          disabled={status !== 'running' && !pendingPrimary}
+          disabled={
+            status !== 'running' &&
+            !pendingPrimary &&
+            (!state?.companion || state.companion.state === 'stopped')
+          }
+          title="Stop primary and managed embedding models"
           onClick={() => launchAction('stop')}
         >
           <Square />
-          Stop
+          Stop both
         </Button>
         <Button
-          id="lx-restart"
+          id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-restart`}
           variant="secondary"
           disabled={!state?.status.config_name || gamingBlocked}
           onClick={() => launchAction('restart')}
@@ -125,7 +130,7 @@ export function LaunchControls({
           Restart
         </Button>
         <Button
-          id="lx-console"
+          id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-console`}
           variant="outline"
           onClick={() => setModal('console')}
         >
@@ -165,7 +170,7 @@ export function LaunchControls({
       )}
       {launcher.diagnostics && (
         <div
-          id="lx-diagnostics"
+          id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-diagnostics`}
           className="space-y-2 rounded-lg border p-3 text-xs"
         >
           <p role="status">{launcher.diagnostics.summary}</p>
@@ -197,7 +202,7 @@ export function LaunchControls({
       )}
       {(launcher.diagnostics || launcher.diagnosticsError) && (
         <Button
-          id="lx-doctor-retry"
+          id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-doctor-retry`}
           variant="outline"
           onClick={launcher.runDiagnostics}
         >
@@ -245,15 +250,21 @@ export function ConfigurationPanel({
   } = launcher
   return (
     <Card
-      id="configuration-panel"
+      id={
+        launcher.role === 'embeddings'
+          ? 'embedding-configuration-panel'
+          : 'configuration-panel'
+      }
       className="surface configuration-panel rounded-2xl"
     >
       <CardHeader className="configuration-header">
         <CardTitle className="flex flex-wrap items-center gap-3 text-lg">
-          Configuration{' '}
+          {launcher.role === 'embeddings'
+            ? 'Embedding configuration'
+            : 'Configuration'}{' '}
           {dirty && (
             <Badge
-              id="lx-dirty-mark"
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-dirty-mark`}
               variant="outline"
               className="border-amber-500 text-amber-300"
             >
@@ -265,7 +276,11 @@ export function ConfigurationPanel({
       <CardContent className="configuration-content space-y-4">
         <div className="configuration-picker flex items-end gap-2">
           <div className="min-w-0 flex-1 space-y-1">
-            <Label htmlFor="lx-config">Saved configuration</Label>
+            <Label
+              htmlFor={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-config`}
+            >
+              Saved configuration
+            </Label>
             <Select
               value={loaded?.name || 'new'}
               onValueChange={(value) =>
@@ -273,7 +288,7 @@ export function ConfigurationPanel({
               }
             >
               <SelectTrigger
-                id="lx-config"
+                id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-config`}
                 className="w-full"
                 title={loaded?.name || 'New configuration'}
               >
@@ -291,7 +306,7 @@ export function ConfigurationPanel({
             </Select>
           </div>
           <Button
-            id="lx-default"
+            id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-default`}
             variant="outline"
             disabled={!loaded}
             onClick={toggleDefault}
@@ -313,7 +328,7 @@ export function ConfigurationPanel({
               : 'Set default'}
           </Button>
           <Button
-            id="lx-delete"
+            id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-delete`}
             ref={deleteButtonRef}
             variant="outline"
             disabled={!loaded}
@@ -325,17 +340,21 @@ export function ConfigurationPanel({
         </div>
         <div className="configuration-model grid grid-cols-[minmax(0,1fr)_76px] gap-3">
           <div className="space-y-2">
-            <Label htmlFor="lx-model">Model (.gguf)</Label>
+            <Label
+              htmlFor={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-model`}
+            >
+              Model (.gguf)
+            </Label>
             <div className="flex gap-2">
               <Input
-                id="lx-model"
+                id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-model`}
                 value={draft.model_path}
                 onChange={(e) => update({ model_path: e.target.value })}
                 placeholder="Path to model.gguf"
                 className={`mono ${changed.model ? 'border-amber-500' : ''}`}
               />
               <Button
-                id="lx-model-browse"
+                id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-model-browse`}
                 variant="outline"
                 onClick={() => openBrowse('model')}
                 aria-label="Browse model"
@@ -345,9 +364,13 @@ export function ConfigurationPanel({
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="lx-port">Port</Label>
+            <Label
+              htmlFor={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-port`}
+            >
+              Port
+            </Label>
             <Input
-              id="lx-port"
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-port`}
               readOnly={!!state?.runtime?.containerized}
               type="number"
               min={1}
@@ -364,15 +387,20 @@ export function ConfigurationPanel({
         </div>
         <p className="text-xs text-muted-foreground">
           {state?.runtime?.containerized
-            ? 'Docker uses internal port 8001. Change INFERENCE_PORT in .env for a different host port. Models are mounted at /models.'
+            ? launcher.role === 'embeddings'
+              ? 'Docker uses internal port 8081. Change EMBEDDING_PORT in .env for a different host port. Models are mounted at /models.'
+              : 'Docker uses internal port 8001. Change INFERENCE_PORT in .env for a different host port. Models are mounted at /models.'
             : 'Port, metrics, and log file are set automatically.'}
         </p>
         <div
           className={`configuration-prompts rounded-xl border bg-background/20 p-3 ${changed.prompts ? 'border-amber-500' : 'border-border/70'}`}
         >
-          <Label htmlFor="lx-log-prompts" className="flex items-start gap-3">
+          <Label
+            htmlFor={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-log-prompts`}
+            className="flex items-start gap-3"
+          >
             <Checkbox
-              id="lx-log-prompts"
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-log-prompts`}
               checked={draft.log_prompts}
               onCheckedChange={(value) =>
                 update({ log_prompts: value === true })
@@ -380,23 +408,26 @@ export function ConfigurationPanel({
             />
             <span>
               <strong className="block text-sm">
-                Save prompts in Activity history
+                {launcher.role === 'embeddings'
+                  ? 'Save embedding prompts to disk'
+                  : 'Save prompts in Activity history'}
               </strong>
               <span className="mt-1 block text-xs font-normal text-muted-foreground">
-                Prompts may contain private data; responses are not saved. Save
-                and relaunch to apply.
+                {launcher.role === 'embeddings'
+                  ? 'Prompts may contain private data. Stored separately from primary Activity history. Save and relaunch to apply.'
+                  : 'Prompts may contain private data; responses are not saved. Save and relaunch to apply.'}
               </span>
             </span>
           </Label>
         </div>
         <div className="configuration-flags space-y-1">
           <Button
-            id="lx-flags-label"
+            id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flags-label`}
             variant="ghost"
             className={`px-0 text-base font-semibold ${changed.flags ? 'text-amber-300' : ''}`}
             onClick={() => setFlagsCollapsed(!flagsCollapsed)}
             aria-expanded={!flagsCollapsed}
-            aria-controls="lx-flags-editor"
+            aria-controls={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flags-editor`}
           >
             {flagsCollapsed ? <ChevronRight /> : <ChevronDown />}Flags{' '}
             <span className="text-xs font-normal text-muted-foreground">
@@ -405,7 +436,7 @@ export function ConfigurationPanel({
           </Button>
           {flagsCollapsed ? (
             <button
-              id="lx-flags-summary"
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flags-summary`}
               type="button"
               className="flags-summary focus-ring flex w-full items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-left"
               onClick={() => setFlagsCollapsed(false)}
@@ -435,7 +466,10 @@ export function ConfigurationPanel({
               </span>
             </button>
           ) : (
-            <div id="lx-flags-editor" className="space-y-3">
+            <div
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flags-editor`}
+              className="space-y-3"
+            >
               {draft.flags.map((flag, index) => {
                 const info = flagIndex.get(flag.flag.trim())
                 return (
@@ -495,7 +529,7 @@ export function ConfigurationPanel({
                 <div className="relative min-w-0 flex-1">
                   <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
                   <Input
-                    id="lx-flag-pick"
+                    id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flag-pick`}
                     className="pl-9"
                     value={flagSearch}
                     onChange={(e) => {
@@ -531,7 +565,7 @@ export function ConfigurationPanel({
                     placeholder="Search supported flags or enter a custom flag"
                     role="combobox"
                     aria-expanded={flagOpen}
-                    aria-controls="lx-flag-list"
+                    aria-controls={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flag-list`}
                     aria-activedescendant={
                       flagOpen && filteredFlags.length
                         ? `lx-flag-option-${flagSelection}`
@@ -540,7 +574,7 @@ export function ConfigurationPanel({
                   />
                   {flagOpen && (
                     <div
-                      id="lx-flag-list"
+                      id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flag-list`}
                       role="listbox"
                       className="absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-border bg-popover p-1 shadow-xl"
                     >
@@ -573,7 +607,7 @@ export function ConfigurationPanel({
                   )}
                 </div>
                 <Button
-                  id="lx-flag-add"
+                  id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flag-add`}
                   variant="outline"
                   onClick={() => addFlag()}
                 >
@@ -581,7 +615,10 @@ export function ConfigurationPanel({
                 </Button>
               </div>
               {flagSource !== 'help' && (
-                <p id="lx-flags-src" className="text-xs text-amber-300">
+                <p
+                  id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-flags-src`}
+                  className="text-xs text-amber-300"
+                >
                   Bundled flag list. Set a valid binary to load every supported
                   flag.
                 </p>
@@ -591,9 +628,13 @@ export function ConfigurationPanel({
         </div>
         <div className="configuration-save grid gap-3">
           <div className="space-y-2">
-            <Label htmlFor="lx-name">Configuration name</Label>
+            <Label
+              htmlFor={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-name`}
+            >
+              Configuration name
+            </Label>
             <Input
-              id="lx-name"
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-name`}
               value={draft.name}
               className={changed.name ? 'border-amber-500' : ''}
               onChange={(e) => update({ name: e.target.value })}
@@ -601,12 +642,15 @@ export function ConfigurationPanel({
             />
           </div>
           <div className="flex items-end gap-2">
-            <Button id="lx-save" onClick={save}>
+            <Button
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-save`}
+              onClick={save}
+            >
               <Save />
               Save
             </Button>
             <Button
-              id="lx-saveas"
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-saveas`}
               variant="outline"
               onClick={() => {
                 setSwitchAfterSaveAs(null)
@@ -680,7 +724,7 @@ export function LauncherDialogs({
             </DialogDescription>
           </DialogHeader>
           <Input
-            id="lx-name-input"
+            id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-name-input`}
             autoFocus
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
@@ -703,7 +747,9 @@ export function LauncherDialogs({
         open={modal === 'switch'}
         onOpenChange={(open) => !open && setModal(null)}
       >
-        <DialogContent id="lx-modal">
+        <DialogContent
+          id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-modal`}
+        >
           <DialogHeader>
             <DialogTitle>Unsaved changes</DialogTitle>
             <DialogDescription>
@@ -800,10 +846,14 @@ export function LauncherDialogs({
               )
             }}
           >
-            <Label htmlFor="lx-browse-path">Location</Label>
+            <Label
+              htmlFor={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-browse-path`}
+            >
+              Location
+            </Label>
             <div className="flex gap-2">
               <Input
-                id="lx-browse-path"
+                id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-browse-path`}
                 className="mono min-w-0"
                 value={browsePath}
                 onChange={(event) => setBrowsePath(event.target.value)}
@@ -836,7 +886,7 @@ export function LauncherDialogs({
             )}
           </form>
           <div
-            id="lx-browse-list"
+            id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-browse-list`}
             className="max-h-[55vh] overflow-auto rounded-xl border border-border"
           >
             {browseLoading && (
@@ -1018,7 +1068,7 @@ export function LauncherDialogs({
               Close
             </Button>
             <Button
-              id="lx-doctor"
+              id={`${launcher.role === 'embeddings' ? 'ex' : 'lx'}-doctor`}
               variant="outline"
               disabled={launcher.diagnosing}
               onClick={() => {

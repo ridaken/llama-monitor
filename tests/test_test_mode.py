@@ -46,7 +46,7 @@ def test_seeded_automation_is_inert_and_test_owned_models_stop(isolated, monkeyp
                      "/api/gaming/prepare", "/api/gaming/retry", "/api/gaming/cancel"):
             response = client.post(path, json={})
             assert response.status_code >= 400 and "test mode" in response.json()["error"]
-    assert stopped == [True]
+    assert stopped == [True, True]
 
 
 def test_main_ignores_inherited_targets_in_test_mode(isolated, monkeypatch):
@@ -110,6 +110,8 @@ def test_launch_and_restart_history_have_model_without_stats(isolated, monkeypat
             "slot print_timing: id 0 | task 1 | total time = 300 ms / 19 tokens\n", encoding="utf-8")
         return manager.status()
 
+    monkeypatch.setattr(app_module.ServerManager, "validate", lambda self, config, **kwargs: (config, "llama-server"))
+    monkeypatch.setattr(app_module.ModelLifecycle, "_check_port", lambda *args: None)
     monkeypatch.setattr(app_module.ServerManager, "launch", fake_launch)
     config = {"name": "Saved profile", "model_path": "/models/weights.gguf", "port": 9001, "flags": flags}
     with TestClient(app_module.build_app(isolated)) as client:

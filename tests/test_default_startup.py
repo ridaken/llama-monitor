@@ -20,6 +20,7 @@ def startup(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module.GpuCollector, "__init__", lambda self: None)
     monkeypatch.setattr(app_module.GpuCollector, "shutdown", lambda self: None)
     monkeypatch.setattr(launcher.ServerManager, "adopt", lambda self: None)
+    monkeypatch.setattr(app_module.ModelLifecycle, "_check_port", lambda *args: None)
     # Exercise real startup scheduling, but not the unrelated background loop.
     monkeypatch.setattr(gaming.GamingCoordinator, "_run", lambda self: None)
     config = {"name": "default", "model_path": str(tmp_path / "model.gguf"), "port": 8001,
@@ -37,6 +38,7 @@ def test_backend_startup_launches_once_without_browser(startup, monkeypatch, con
     if containerized:
         monkeypatch.setenv("LLAMA_MONITOR_CONTAINER", "1")
         store.set_running({"pid": 123, "config": config})  # stale container PID
+    monkeypatch.setattr(launcher.ServerManager, "validate", lambda self, config, **kwargs: (config, "llama-server"))
     launches = Mock(return_value={})
     monkeypatch.setattr(launcher.ServerManager, "launch", launches)
     with TestClient(app_module.build_app(args)) as client:

@@ -43,6 +43,28 @@ def test_readiness_requires_live_health_not_cache(probe, monkeypatch):
     assert probe.readiness()["state"] == "loading"
 
 
+@pytest.mark.parametrize("vector,valid", [([0.1, -2, 0], True), ([], False), ([True], False),
+                                         (["bad"], False), ([[1]], False), ([float("inf")], False)])
+def test_embedding_smoke_validates_vector(probe, monkeypatch, vector, valid):
+    probe.manager.role = "embeddings"
+    store.set_running({"pid": 123, "run_id": "test-run"}, "embeddings")
+    async def request(*args, **kwargs):
+        assert args[0].endswith("/v1/embeddings")
+        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"data": [{"embedding": vector}]})
+    class Client:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        post = staticmethod(request)
+    monkeypatch.setattr(v.httpx, "AsyncClient", lambda **kwargs: Client())
+    if valid:
+        assert asyncio.run(probe.smoke(1))["dimensions"] == len(vector)
+    else:
+        with pytest.raises(v.VerificationError, match="vector"):
+            asyncio.run(probe.smoke(1))
+
+
 def test_wrong_listener_is_never_probed(probe, monkeypatch):
     monkeypatch.setattr(v, "owns_port", lambda _: False)
     monkeypatch.setattr(v.httpx, "Client", lambda **kw: pytest.fail("must not contact another process"))

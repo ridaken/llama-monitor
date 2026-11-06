@@ -111,12 +111,13 @@ def _records():
     return runs
 
 
-def list_runs(limit: int = 50, cursor: str = "") -> dict:
+def list_runs(limit: int = 50, cursor: str = "", role="primary") -> dict:
     if not 1 <= limit <= 200:
         raise ValueError("limit must be between 1 and 200")
     if cursor and not _ID.fullmatch(cursor):
         raise ValueError("Invalid log listing cursor.")
-    runs = _records()
+    store.validate_role(role)
+    runs = [r for r in _records() if r.get("role", "primary") == role]
     if cursor:
         index = next((i for i, r in enumerate(runs) if r["run_id"] == cursor), None)
         if index is None:
@@ -128,8 +129,8 @@ def list_runs(limit: int = 50, cursor: str = "") -> dict:
             "next_cursor": runs[limit - 1]["run_id"] if len(runs) > limit else None}
 
 
-def latest() -> str | None:
-    items = list_runs(1)["items"]
+def latest(role="primary") -> str | None:
+    items = list_runs(1, role=role)["items"]
     return items[0]["run_id"] if items else None
 
 
@@ -265,7 +266,7 @@ class Filter:
 
 class Writer:
     def __init__(self, run_id: str, config_name: str | None = None, *, budget: int = BUDGET,
-                 segment_size: int = SEGMENT):
+                 segment_size: int = SEGMENT, role="primary"):
         self.run_id = run_id
         self.directory = run_dir(run_id)
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -277,7 +278,7 @@ class Writer:
         self.position = 0
         self.segment_start = 0
         self.segment_bytes = 0
-        self.record = {"run_id": run_id, "config_name": (config_name or "")[:256],
+        self.record = {"run_id": run_id, "role": role, "config_name": (config_name or "")[:256],
                        "started_at": time.time(), "ended_at": None, "state": "starting",
                        "exit_code": None, "stop_reason": None, "gap": False,
                        "startup_truncated": False, "logging_error": None}

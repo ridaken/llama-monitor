@@ -6,8 +6,7 @@ The dashboard owns three flags so it can monitor whatever it launches:
 (activity detection + exact per-request stats). The user supplies the model path, the port value and any
 other flags; those three are injected at launch.
 
-Single-instance by design: launching while a server is running stops the old one
-first. On a successful launch the manager calls the injected ``retarget``
+Each role owns one instance: launching replaces that role's old process. On a successful launch the manager calls the injected ``retarget``
 callback so the dashboard immediately starts polling the new server.
 """
 
@@ -120,7 +119,9 @@ class ServerManager:
     """Owns the lifecycle of a single launched llama-server process."""
 
     def __init__(self, retarget: Callable[[str, str, int], None],
-                 finish_log: Optional[Callable[[], None]] = None):
+                 finish_log: Optional[Callable[[], None]] = None, *, role="primary"):
+        self.role = store.validate_role(role)
+        self.log_path = store.MANAGED_LOG if role == "primary" else os.path.join(store.HOME_DIR, "embeddings.log")
         # retarget(url, log_path, port) repoints the dashboard's collectors.
         self._retarget = retarget
         self._finish_log = finish_log
@@ -140,6 +141,15 @@ class ServerManager:
         # its own is reported as "exited (code N)".
         self._stopped_by_user = False
 
+    def _get_record(self):
+        return store.get_running() if self.role == "primary" else store.get_running(self.role)
+
+    def _set_record(self, record):
+        if self.role == "primary":
+            store.set_running(record)
+        else:
+            store.set_running(record, self.role)
+
     # -- state -------------------------------------------------------------- #
 
     def _refresh(self) -> None:
@@ -148,12 +158,12 @@ class ServerManager:
             self.exit_code = self._proc.returncode
             self._proc = None
             self._identity = None
-            store.set_running(None)
+            self._set_record(None)
         # An adopted server (no Popen handle) that has since died -> forget it
         # and drop the persisted record so we don't keep reporting "running".
         if self._adopted_pid is not None and not identity_matches(self._identity):
             self._adopted_pid = None
-            store.set_running(None)
+            self._set_record(None)
 
     def status(self) -> dict:
         with self._lock:
@@ -187,12 +197,12 @@ class ServerManager:
         record so the caller can repoint monitoring. Otherwise clear the stale
         record and return None.
         """
-        rec = store.get_running()
+        rec = self._get_record()
         if not rec:
             return None
         pid = rec.get("pid")
         if not _process_alive(pid):
-            store.set_running(None)
+            self._set_record(None)
             return None
         # Upgrade legacy records only after checking their executable, launch
         # time and model. Never adopt a reused numeric PID merely by name.
@@ -206,7 +216,7 @@ class ServerManager:
                          and abs(actual["created_at"] - rec.get("started_at", 0)) < 2
                          and config.get("model_path") in actual["argv"])
             if not valid:
-                store.set_running(None)
+                self._set_record(None)
                 return None
         except Exception as exc:
             self.last_error = f"Cannot verify previously launched server: {exc}"
@@ -214,7 +224,7 @@ class ServerManager:
         rec["identity"] = actual
         if not rec.get("run_id"):
             rec["run_id"] = uuid.uuid4().hex
-        store.set_running(rec)
+        self._set_record(rec)
         with self._lock:
             self.current = rec.get("config")
             self.started_at = rec.get("started_at")
@@ -245,6 +255,11 @@ class ServerManager:
         advertised = flags_mod.get_server_flags(binary)
         supported = {alias for entry in advertised["flags"] for alias in entry.get("flags", [])} \
             if advertised["source"] == "help" else set()
+        if self.role == "embeddings":
+            embedding_flag = "--embedding" if "--embedding" in supported else "--embeddings"
+            if advertised["source"] == "help" and embedding_flag not in supported:
+                raise LaunchError("This llama-server build does not advertise embedding mode.")
+            argv += [embedding_flag if supported else "--embedding"]
         logging_flags = {"-lv", "--verbosity", "--log-verbosity", "-v", "--verbose",
                          "--log-verbose", "--log-disable"}
         explicit_logging = any(token.split("=", 1)[0] in logging_flags for token in argv[3:])
@@ -260,7 +275,7 @@ class ServerManager:
         if config.get("log_prompts"):
             if "--log-prompts-dir" not in supported:
                 raise LaunchError("This llama-server build does not support prompt logging.")
-            argv += ["--log-prompts-dir", store.PROMPTS_DIR]
+            argv += ["--log-prompts-dir", store.PROMPTS_DIR if self.role == "primary" else os.path.join(store.PROMPTS_DIR, "embeddings")]
         return self._capture_argv(argv)
 
     @staticmethod
@@ -281,7 +296,7 @@ class ServerManager:
 
     # -- lifecycle ---------------------------------------------------------- #
 
-    def launch(self, config: dict, *, _snapshot: Optional[dict] = None, _reason: str = "replacement_launch") -> dict:
+    def validate(self, config: dict, *, _snapshot=None):
         settings = store.get_settings()
         binary = resolve_binary(_snapshot["executable"] if _snapshot else settings.get("llama_server_path"))
         if not binary:
@@ -303,9 +318,19 @@ class ServerManager:
             raise LaunchError("Port must be a number.")
         if not (1 <= port <= 65535):
             raise LaunchError("Port must be between 1 and 65535.")
-        if runtime.containerized() and port != 8001:
-            raise LaunchError("Docker uses internal port 8001. Change INFERENCE_PORT in .env to publish another host port.")
+        expected_port = 8001 if self.role == "primary" else 8081
+        if runtime.containerized() and port != expected_port:
+            raise LaunchError(f"Docker uses internal port {expected_port} for {self.role}. Change its published port in .env.")
         config = {**config, "port": port}
+
+        # Build before stopping anything, so unsupported flags fail safely.
+        if not _snapshot:
+            self.build_argv(config, binary)
+        return config, binary
+
+    def launch(self, config: dict, *, _snapshot: Optional[dict] = None, _reason: str = "replacement_launch") -> dict:
+        config, binary = self.validate(config, _snapshot=_snapshot)
+        port = config["port"]
 
         argv = self._capture_argv(list(_snapshot["argv"])) if _snapshot else self.build_argv(config, binary)
         cwd = _snapshot["cwd"] if _snapshot else os.path.dirname(binary) or None
@@ -321,7 +346,8 @@ class ServerManager:
             managed_logs.import_legacy()
             self.run_id = uuid.uuid4().hex
             try:
-                self._proc = log_capture.launch(argv, cwd, self.run_id, config.get("name"))
+                self._proc = log_capture.launch(argv, cwd, self.run_id, config.get("name"),
+                                                **({"role": self.role} if self.role != "primary" else {}))
             except Exception as e:
                 self._proc = None
                 self.last_error = str(e)
@@ -340,19 +366,19 @@ class ServerManager:
                 # owns the child, but it cannot be adopted without an identity.
                 self._identity = None
             # Persist so a restarted dashboard can re-adopt this server.
-            store.set_running({
+            self._set_record({
                 "pid": self._proc.pid,
                 "port": port,
                 "config": config,
                 "started_at": self.started_at,
                 "run_id": self.run_id,
                 "log_format": "filtered-v1",
-                "log_path": store.MANAGED_LOG,
+                "log_path": self.log_path,
                 "identity": self._identity,
             })
 
         # Repoint the dashboard at the freshly launched server.
-        self._retarget(f"http://127.0.0.1:{port}", store.MANAGED_LOG, port)
+        self._retarget(f"http://127.0.0.1:{port}", self.log_path, port)
         return self.status()
 
     def stop(self, reason: str = "manual_stop") -> dict:
@@ -363,7 +389,7 @@ class ServerManager:
             if had_server and self._finish_log:
                 self._finish_log()
             self._stopped_by_user = True
-            store.set_running(None)
+            self._set_record(None)
         return self.status()
 
     def _stop_locked(self, reason: str = "manual_stop") -> None:
@@ -413,7 +439,8 @@ class ServerManager:
             actual = capture_process(pid)
             if self._identity and not identity_matches(self._identity):
                 raise LaunchError("Managed server identity changed.")
-            return {**actual, "id": "primary", "name": (self.current or {}).get("name") or "Primary model",
+            return {**actual, "id": self.role, "name": (self.current or {}).get("name") or self.role.title(),
+                    "managed": True,
                     "port": self.current["port"], "config": self.current.copy()}
 
     def restore(self, snapshot: dict) -> dict:

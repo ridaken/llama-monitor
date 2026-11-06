@@ -49,7 +49,7 @@ for (const source of ['log', 'nvml', 'nvml-delta']) {
       source === 'log'
         ? 'llama.cpp buffers \u00b7 logged'
         : source === 'nvml'
-          ? 'llama-server VRAM'
+          ? 'Primary model VRAM'
           : 'llama-server \u00b7 estimate'
     await expect(gpu.locator('.model-memory')).toContainText(label)
     await expect(gpu.locator('.model-memory')).toContainText('10.0 GB')

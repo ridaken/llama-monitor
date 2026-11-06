@@ -72,14 +72,14 @@ class CapturedProcess:
         self._signal(True)
 
 
-def launch(argv, cwd, run_id, config_name):
+def launch(argv, cwd, run_id, config_name, *, role="primary"):
     logs.run_dir(run_id).mkdir(parents=True, exist_ok=True)
     supervisor = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), run_id], stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detached())
     try:
         supervisor.stdin.write(json.dumps({"argv": argv, "cwd": cwd, "name": config_name,
-                                          "managed_log": str(logs.store.MANAGED_LOG)}).encode())
+                                          "role": role, "managed_log": str(logs.store.MANAGED_LOG)}).encode())
         supervisor.stdin.close()
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
@@ -103,7 +103,7 @@ def launch(argv, cwd, run_id, config_name):
 def supervise(run_id):
     payload = json.loads(sys.stdin.buffer.read())
     logs.store.MANAGED_LOG = payload["managed_log"]
-    writer = logs.Writer(run_id, payload.get("name"))
+    writer = logs.Writer(run_id, payload.get("name"), role=payload.get("role", "primary"))
     writer.record["supervisor_identity"] = identity(os.getpid())
     writer.publish()
     child = None

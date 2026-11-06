@@ -22,6 +22,38 @@ def test_retained_log_cli_routes(invoke):
     assert code == 2 and not calls
 
 
+def test_embedding_role_and_wait_pin_operation_through_cpu_retry(invoke, tmp_path):
+    config_path = tmp_path / "embedding.json"
+    config_path.write_text(json.dumps({"model_path": "/models/embed.gguf", "port": 8081}))
+    steps = iter([
+        {"state": "waiting", "ready": False, "operation_id": "op", "run_id": None},
+        {"state": "cpu_retry", "ready": False, "operation_id": "op", "run_id": "gpu-run"},
+        {"state": "ready", "ready": True, "operation_id": "op", "run_id": "cpu-run"},
+    ])
+    def handler(request):
+        assert request.url.params["role"] == "embeddings"
+        if request.url.path.endswith("launch"):
+            return {"status": {"operation_id": "op", "run_id": None}}
+        return next(steps)
+    code, output, _ = invoke(["launch", "--role", "embeddings", "--config-file", str(config_path), "--wait"], handler)
+    assert code == 0 and output["data"]["readiness"]["run_id"] == "cpu-run"
+
+
+def test_embedding_wait_rejects_replacement(invoke):
+    steps = iter([
+        {"state": "waiting", "ready": False, "operation_id": "first"},
+        {"state": "ready", "ready": True, "operation_id": "replacement"},
+    ])
+    code, output, _ = invoke(["wait", "--ready", "--role", "embeddings"], lambda _: next(steps))
+    assert code == 1 and "changed" in output["error"]["message"]
+
+
+def test_embedding_configs_and_smoke_are_role_scoped(invoke):
+    for args in (["configs", "list"], ["smoke"], ["logs", "--runs"], ["stop"]):
+        code, _, calls = invoke([*args, "--role", "embeddings"], lambda _: {"configs": [], "items": []})
+        assert code == 0 and all(c.url.params["role"] == "embeddings" for c in calls)
+
+
 @pytest.fixture
 def invoke(monkeypatch, capsys):
     real_client = httpx.Client

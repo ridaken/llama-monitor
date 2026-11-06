@@ -163,7 +163,7 @@ def test_two_load_failures_then_no_more_automatic_attempts(rig):
     disconnect(rig)
     c.tick()
     assert c.state()["phase"] == "retry_countdown"
-    assert a.live and len(a.loads) == 1
+    assert not a.live and len(a.loads) == 0
     now[0] += 59
     c.tick()
     assert len(p.loads) == 1
@@ -173,7 +173,7 @@ def test_two_load_failures_then_no_more_automatic_attempts(rig):
     for _ in range(3):
         now[0] += 600
         c.tick()
-    assert len(p.loads) == 2 and len(a.loads) == 1
+    assert len(p.loads) == 2 and len(a.loads) == 0
     p.fail_load = False
     c.retry()
     c.tick()
@@ -207,7 +207,7 @@ def test_new_session_after_terminal_failure_does_not_retry_stopped_model(rig):
     c.tick()
     now[0] += 60
     c.tick()
-    assert len(p.loads) == 2 and a.live
+    assert len(p.loads) == 2 and not a.live
 
 
 def test_prepare_discovers_missed_connection(rig):
@@ -488,7 +488,7 @@ def test_boot_failure_keeps_two_attempt_limit(rig):
     p.fail_load = True
     c.schedule_boot_models(2)
     c.tick()
-    assert a.live and c.state()["phase"] == "retry_countdown"
+    assert not a.live and c.state()["phase"] == "retry_countdown"
     now[0] += 60
     c.tick()
     assert len(p.loads) == 2 and c.state()["phase"] == "failed"

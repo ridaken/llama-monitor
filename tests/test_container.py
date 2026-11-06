@@ -46,9 +46,9 @@ def test_container_starts_without_model_and_clears_stale_pid(container, monkeypa
         state = client.get("/api/launcher/state").json()
         assert state["status"]["state"] == "stopped"
         assert state["settings"]["models_dir"] == "/models"
-        assert state["runtime"] == {"containerized": True, "models_dir": "/models", "managed_port": 8001}
+        assert state["runtime"] == {"containerized": True, "models_dir": "/models", "managed_port": 8001, "embedding_port": 8081, "embedding_published_port": 8081}
         assert store.get_running() is None
-    assert stopped == ["container_shutdown"]
+    assert stopped == ["container_shutdown", "container_shutdown"]
 
 
 @pytest.mark.parametrize("path", ["/api/startup/install", "/api/startup/remove",

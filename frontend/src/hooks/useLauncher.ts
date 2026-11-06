@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, post } from '@/api'
+import { api as rootApi, post as rootPost } from '@/api'
 import { basename } from '@/lib/utils'
 import {
   appendConsoleEntries,
@@ -73,14 +73,24 @@ const cleanFlag = (flag: Flag) => ({
   value: flag.value.trim(),
   ...(flag.enabled === false ? { enabled: false } : {}),
 })
-export function useLauncher() {
+export function useLauncher(role: 'primary' | 'embeddings' = 'primary') {
+  const defaultPort = role === 'primary' ? 8001 : 8081
+  const scopedPath = (path: string) =>
+    role === 'embeddings' && /^\/api\/(launcher\/|configs)/.test(path)
+      ? `${path}${path.includes('?') ? '&' : '?'}role=embeddings`
+      : path
+  const api = <T>(path: string, options?: RequestInit) =>
+    rootApi<T>(scopedPath(path), options)
+  const post = <T>(path: string, body: unknown) =>
+    rootPost<T>(scopedPath(path), body)
   const [state, setState] = useState<LauncherState | null>(null)
+  const [savingEmbeddingSettings, setSavingEmbeddingSettings] = useState(false)
   const [savingAutostart, setSavingAutostart] = useState(false)
   const [autostartSaveError, setAutostartSaveError] = useState('')
   const [knownFlags, setKnownFlags] = useState<KnownFlag[]>([])
   const [flagSource, setFlagSource] = useState('bundled')
   const [loaded, setLoaded] = useState<Config | null>(null)
-  const [draft, setDraft] = useState<Config>(blank(8001))
+  const [draft, setDraft] = useState<Config>(blank(defaultPort))
   const [message, setMessage] = useState<{
     text: string
     bad?: boolean
@@ -159,7 +169,7 @@ export function useLauncher() {
     }
   }, [])
   useEffect(() => {
-    if (state?.status.state === 'exited') runDiagnostics()
+    if (role === 'primary' && state?.status.state === 'exited') runDiagnostics()
     else {
       ++diagnosticRequest.current
       setDiagnostics(null)
@@ -180,8 +190,8 @@ export function useLauncher() {
   const dirty = loaded
     ? canonical(draft) !== canonical(loaded)
     : canonical(draft) !==
-      canonical(blank(state?.settings.default_port || 8001))
-  const baseline = loaded || blank(state?.settings.default_port || 8001)
+      canonical(blank(state?.settings.default_port || defaultPort))
+  const baseline = loaded || blank(state?.settings.default_port || defaultPort)
   const changed = {
     model: draft.model_path.trim() !== baseline.model_path.trim(),
     port: draft.port !== baseline.port,
@@ -203,13 +213,16 @@ export function useLauncher() {
   ) => {
     const found = available.find((c) => c.name === name) || null
     const normalized = found
-      ? normalizeConfig(found, stateRef.current?.settings.default_port || 8001)
+      ? normalizeConfig(
+          found,
+          stateRef.current?.settings.default_port || defaultPort,
+        )
       : null
     setLoaded(normalized ? structuredClone(normalized) : null)
     setDraft(
       normalized
         ? structuredClone(normalized)
-        : blank(stateRef.current?.settings.default_port || 8001),
+        : blank(stateRef.current?.settings.default_port || defaultPort),
     )
     setMessage({ text: '' })
   }
@@ -236,10 +249,18 @@ export function useLauncher() {
         applyState(current)
         if (!initialized.current) {
           initialized.current = true
-          const running = current.status.state === 'running'
+          const running =
+            role === 'embeddings'
+              ? [
+                  'running',
+                  'waiting',
+                  'loading',
+                  'ready',
+                  'cpu_retry',
+                ].includes(current.status.state)
+              : current.status.state === 'running'
           const pendingRestore = current.gaming?.servers.some(
-            (server) =>
-              server.id === 'primary' && server.status !== 'cancelled',
+            (server) => server.id === role && server.status !== 'cancelled',
           )
           const runningConfig =
             running || pendingRestore ? current.status.config : null
@@ -250,7 +271,7 @@ export function useLauncher() {
             setDraft(
               normalizeConfig(
                 runningConfig,
-                current.settings.default_port || 8001,
+                current.settings.default_port || defaultPort,
               ),
             )
             notify('Restored the running server configuration.')
@@ -414,7 +435,9 @@ export function useLauncher() {
       applyState(next)
       notify(
         action === 'launch'
-          ? 'Launched. Monitoring the new server.'
+          ? role === 'embeddings'
+            ? 'Embedding launch requested.'
+            : 'Launched. Monitoring the new server.'
           : action === 'restart'
             ? 'Restarted.'
             : 'Stopped.',
@@ -702,8 +725,25 @@ export function useLauncher() {
   const status = state?.status.state || 'stopped'
   const gamingBlocked = !!state?.gaming?.blocked
   const pendingPrimary = state?.gaming?.servers.some(
-    (server) => server.id === 'primary' && server.status !== 'cancelled',
+    (server) => server.id === role && server.status !== 'cancelled',
   )
+  const saveEmbeddingSettings = async (changes: {
+    autostart_after_primary?: boolean
+    cpu_fallback?: boolean
+  }) => {
+    const previous = stateRef.current
+    if (!previous || savingEmbeddingSettings) return
+    setSavingEmbeddingSettings(true)
+    applyState({ ...previous, settings: { ...previous.settings, ...changes } })
+    try {
+      applyState(await post<LauncherState>('/api/launcher/settings', changes))
+    } catch (error) {
+      applyState(previous)
+      notify((error as Error).message, true)
+    } finally {
+      setSavingEmbeddingSettings(false)
+    }
+  }
   const statusText =
     status === 'running'
       ? `Running${state?.status.config_name ? ` · ${state.status.config_name}` : ''}`
@@ -711,6 +751,9 @@ export function useLauncher() {
         ? `Exited (code ${state?.status.exit_code})`
         : 'Stopped'
   return {
+    role,
+    saveEmbeddingSettings,
+    savingEmbeddingSettings,
     launchAction,
     diagnostics,
     diagnosticsError,
