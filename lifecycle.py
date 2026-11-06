@@ -51,7 +51,9 @@ class ManagedAuxiliary:
         return self.legacy.alive(record)
 
     def stop(self, record):
-        if record and record.get("managed"):
+        managed_child = (self.lifecycle.embeddings._proc is not None
+                         or getattr(self.lifecycle.embeddings, "_adopted_pid", None) is not None)
+        if (record and record.get("managed")) or (record is None and managed_child):
             self.lifecycle.stop_embeddings("gaming_suspension")
         else:
             self.legacy.stop(record)

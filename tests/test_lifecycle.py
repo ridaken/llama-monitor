@@ -363,3 +363,17 @@ def test_primary_process_discovery_never_sums_embedding_listener(monkeypatch):
         SimpleNamespace(status="LISTEN", laddr=SimpleNamespace(port=8081), pid=456)])
     monkeypatch.setattr(collectors.psutil, "process_iter", lambda *args: pytest.fail("do not discover by name"))
     assert collectors.find_llama_pids(port=8001) == {123}
+
+
+@pytest.mark.parametrize("stop_error", [False, True])
+def test_recovery_cleanup_without_snapshot_uses_managed_owner(rig, stop_error):
+    rig.c.launch_embeddings(E)
+    rig.e._proc = object()  # A spawned child whose snapshot could not be captured.
+    rig.e.stop_error = stop_error
+    if stop_error:
+        with pytest.raises(LaunchError):
+            rig.g.auxiliary.stop(None)
+        assert rig.e.live and rig.c.state()["state"] == "failed"
+    else:
+        rig.g.auxiliary.stop(None)
+        assert not rig.e.live
