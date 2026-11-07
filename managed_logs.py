@@ -282,6 +282,7 @@ class Writer:
                        "started_at": time.time(), "ended_at": None, "state": "starting",
                        "exit_code": None, "stop_reason": None, "gap": False,
                        "startup_truncated": False, "logging_error": None}
+        self.observer = None
         # Reserve a small error channel before inference starts. Updating existing
         # allocated bytes can report ENOSPC even when atomic replacement cannot.
         (self.directory / "health.json").write_text('{"error":null}'.ljust(4096), encoding="utf-8")
@@ -337,6 +338,8 @@ class Writer:
 
     def feed(self, raw: str):
         obj, msg = self.filter.select(raw)
+        if self.observer and msg and not _PAYLOAD.search(msg):
+            self.observer.feed(msg)
         metadata = bool(_METADATA.search(msg))
         if metadata:
             self.placement.feed(msg)
@@ -409,7 +412,8 @@ class Writer:
 def stop_intent(run_id: str | None, reason: str, *, forced: bool = False, failed: bool = False):
     if run_id and load(run_id):
         try:
-            atomic(run_dir(run_id) / "stop.json", {"reason": reason, "forced": forced, "failed": failed, "at": time.time()})
+            atomic(run_dir(run_id) / "stop.json", {"reason": reason, "forced": forced, "failed": failed,
+                                                   "at": time.time(), "monotonic_at": time.monotonic()})
         except OSError as exc:
             # Disk failure must not prevent an explicitly requested model stop.
             try:
@@ -439,6 +443,11 @@ def reconcile():
         except Exception:
             continue  # permission failure is not proof of an exit
         if not alive:
+            # Identity probing can overlap the supervisor's final publication.
+            # Once it is dead, reread its last record before marking interruption.
+            record = load(rec["run_id"])
+            if record.get("state") not in ("starting", "running", "ready"):
+                continue
             try:
                 child_alive = bool(record.get("identity") and identity_matches(record["identity"]))
             except Exception:

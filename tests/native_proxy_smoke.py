@@ -97,6 +97,8 @@ def main():
                 try:
                     process = start(log)
                     cli("wait", "--backend", "--timeout", "10")
+                    eventually(lambda: any(e["code"] == "ready" for e in cli("app-logs")["items"]))
+                    assert cli("app-stats")["available"]
                     assert cli("status")["readiness"]["state"] == "stopped"
                     assert not cli("proxy", "status")["enabled"]
                     direct = cli("test-prompt", "--timeout", "5")

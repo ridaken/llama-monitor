@@ -116,6 +116,8 @@ class WindowsStartup:
             except (FileNotFoundError, ValueError):
                 if time.time() - pending["created_at"] > 600:
                     store.update_startup(pending=None, last_error="Windows setup did not finish. Try again.")
+                    if getattr(self, "observability", None):
+                        self.observability.event("startup", "setup_timed_out", "Windows startup setup did not finish.", "warning")
                 return
             if result.get("operation") != pending["operation"]:
                 return
@@ -132,6 +134,9 @@ class WindowsStartup:
                 store.update_state(apply)
             else:
                 store.update_startup(pending=None, last_error=result.get("error") or "Windows setup failed.")
+            if getattr(self, "observability", None):
+                self.observability.event("startup", "setup_completed" if result.get("success") is True else "setup_failed",
+                                         "Windows startup setup operation finished.", "info" if result.get("success") is True else "warning")
 
     def state(self):
         self.consume_result()

@@ -126,11 +126,15 @@ class Proxy:
             self.listener_error = "Proxy listener stopped unexpectedly. Disable and re-enable it to retry."
         finally:
             sock.close()
+            if getattr(self, "observability", None):
+                self.observability.condition("proxy", "listener_failed", bool(self.listener_error))
 
     async def state(self):
         settings = await asyncio.to_thread(store.get_proxy)
         target = await asyncio.to_thread(self.target)
         hostname = f"[{self.host}]" if ":" in self.host else self.host
+        if getattr(self, "observability", None):
+            self.observability.condition("proxy", "listener_failed", bool(self.listener_error))
         return {**settings, "host": self.host, "port": self.port,
                 "base_url": f"http://{hostname}:{self.port}/v1",
                 "target": target.get("url") if target else None,
@@ -140,9 +144,14 @@ class Proxy:
     async def save(self, operation, *args):
         if self.history:
             try:
-                return await asyncio.to_thread(getattr(self.history, operation), *args)
+                result = await asyncio.to_thread(getattr(self.history, operation), *args)
+                if getattr(self, "observability", None):
+                    self.observability.condition("proxy", "capture_failed", False)
+                return result
             except Exception:
                 self.capture_error = "Request capture failed. Some requests or content may be missing; inference continues."
+                if getattr(self, "observability", None):
+                    self.observability.condition("proxy", "capture_failed", True)
         return None
 
     async def validate_target(self, target):

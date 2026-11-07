@@ -10,6 +10,7 @@ import uuid
 import flags
 import psutil
 import store
+import observability
 from launcher import LaunchError, resolve_binary
 from verification import ManagedVerification, owns_port
 
@@ -96,8 +97,20 @@ class ModelLifecycle:
         store.update_state(lambda state: state["embeddings"].update(operation=copy.deepcopy(self.operation)))
 
     def _state(self, state, reason):
+        previous = self.operation.get("state")
         self.operation.update(state=state, reason=reason)
         self._save()
+        recorder = getattr(self, "observability", None)
+        if recorder and previous != state:
+            context = {"role": "embeddings", "operation_id": self.operation["id"],
+                       "model": observability.model_key(self.operation["config"].get("model_path")),
+                       "run_id": self.operation.get("run_id"), "state": state}
+            recorder.event("lifecycle", "embedding_" + state, "Embedding lifecycle state changed.",
+                           "warning" if state == "failed" else "info", **context)
+            if state == "cpu_retry":
+                recorder.measure("cpu_fallback_attempts", model=context["model"], role="embeddings")
+            if state == "ready" and self.operation.get("cpu"):
+                recorder.measure("cpu_fallback_outcomes", model=context["model"], role="embeddings", run_id=context["run_id"])
 
     def _validate(self, config, manager, snapshot=None):
         config, binary = manager.validate(copy.deepcopy(config), **({"_snapshot": snapshot} if snapshot else {}))
@@ -144,6 +157,10 @@ class ModelLifecycle:
                           "recovery": recovery, "run_id": None, "deadline": None,
                           "primary_deadline": self.clock() + 300}
         self._save()
+        if getattr(self, "observability", None):
+            self.observability.event("lifecycle", "embedding_queued", "Embedding launch queued.", role="embeddings",
+                                     model=observability.model_key(config.get("model_path")),
+                                     operation_id=self.operation["id"], state="waiting")
 
     def launch_primary(self, config=None):
         with self.lock:

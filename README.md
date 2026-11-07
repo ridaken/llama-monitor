@@ -735,6 +735,54 @@ See the [history API](docs/api.md#history-and-prompts) and
 [CLI history filters](docs/cli.md#history-filters) for querying records, pagination,
 prompt retrieval, and clearing stored history.
 
+## Application logs and usage metrics
+
+Application diagnostics and managed-model usage are available through the CLI
+and HTTP API, without a separate dashboard screen:
+
+```sh
+python cli.py app-logs --level warning --since 2h
+python cli.py app-logs --component launcher --run RUN_ID --json
+python cli.py app-logs --follow
+python cli.py app-stats
+python cli.py app-stats --role embeddings --since 7d --json
+python cli.py app-stats --run RUN_ID --json
+```
+
+In Docker, prefix these commands with `docker compose exec -T monitor`.
+`app-logs` contains structured application lifecycle, control-operation,
+integration, and background-failure events. Repeated background failures are
+suppressed and summarized on recovery or shutdown. It excludes request content,
+credentials, raw invocations, and routine successful HTTP polls. The existing
+model Console and rotating background `backend.log` retain their separate roles.
+
+`app-stats` defaults to the current UTC day. It reports observed backend/model
+uptime, initialization and load duration, model loading/busy/idle/unknown time,
+lifecycle outcomes, stop/restoration latency, and recording health. Model
+utilization is busy time divided by known busy plus idle time. Concurrent tasks
+count once toward busy wall time. Missing activity signals are unknown, not idle.
+Load duration ends at a recognized ready log marker; it does not certify HTTP
+readiness. Models are identified by normalized model path, with primary and
+embedding roles reported separately. Counters distinguish process creation
+attempts from control operations rejected before process creation.
+
+Detached supervisors record both managed roles while the backend is closed;
+external servers are outside usage tracking. Checkpoints occur every five
+seconds and on transitions. After abrupt interruption, only measurements through
+the last checkpoint are known. Existing running supervisors gain tracking after
+a model relaunch; historical logs are not backfilled. No idle HTTP polls or
+browser session are required. Historical CPU/RAM/GPU sampling is not included.
+
+New tables in `history.sqlite` have an approximate **50 MiB** shared allowance,
+separate from the diagnostic-file budget and unlimited request history. Old
+events and detail are removed first, followed by old complete daily buckets if
+needed. Active checkpoints are preserved. This is an estimated retained-data
+limit, not a cap on the SQLite file, its indexes, or WAL. Existing history clear
+actions do not clear application observations. Reports expose retention gaps and
+daily bucket boundaries; partial expired-detail buckets are not represented as
+exact range totals. See the [API](docs/api.md#application-observability) and
+[CLI](docs/cli.md#application-observability) contracts.
+
 ## Inference proxy and request history
 
 Enable **Manage → Inference proxy → Enable inference proxy**, then change your

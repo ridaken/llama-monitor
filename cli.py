@@ -6,6 +6,7 @@ import asyncio
 import json
 import math
 import os
+import re
 from pathlib import Path
 import sys
 import time
@@ -47,6 +48,19 @@ def parser():
     common.add_argument("--request-timeout", type=positive, default=argparse.SUPPRESS)
     root = Parser(description=__doc__, parents=[common])
     commands = root.add_subparsers(dest="command", required=True, parser_class=Parser)
+    for name in ("app-logs", "app-stats"):
+        command = commands.add_parser(name, parents=[common])
+        for option in ("model", "run"):
+            command.add_argument("--" + option)
+        for option in ("from-ts", "to-ts"):
+            command.add_argument("--" + option, type=float)
+        command.add_argument("--since", help="Relative range, e.g. 30m, 2h, or 7d")
+        if name == "app-logs":
+            command.add_argument("--level", choices=("info", "warning", "error"), default="info")
+            command.add_argument("--component", default="")
+            command.add_argument("--limit", type=int, default=50)
+            command.add_argument("--cursor")
+            command.add_argument("--follow", action="store_true")
     for name in ("status", "stop", "stats", "doctor"):
         commands.add_parser(name, parents=[common])
     for name in ("launch", "restart"):
@@ -199,6 +213,37 @@ class RoleClient:
 
 
 def execute(args, client):
+    if args.command in ("app-logs", "app-stats"):
+        params = {key: getattr(args, key) for key in ("model", "role", "from_ts", "to_ts")
+                  if getattr(args, key, None) is not None}
+        if args.run:
+            params["run_id"] = args.run
+        if args.since:
+            if args.from_ts is not None:
+                raise CLIError("--since and --from-ts cannot be combined.", 2)
+            match = re.fullmatch(r"(\d+(?:\.\d+)?)([smhd])", args.since)
+            if not match or not math.isfinite(float(match[1])) or float(match[1]) <= 0:
+                raise CLIError("--since must be a positive duration such as 30m, 2h, or 7d.", 2)
+            params["from_ts"] = time.time() - float(match[1]) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[match[2]]
+        if args.command == "app-stats":
+            return client.request("GET", "/api/observability/metrics", params=params)
+        if not 1 <= args.limit <= 200:
+            raise CLIError("--limit must be between 1 and 200.", 2)
+        params.update(level=args.level, component=args.component, limit=args.limit)
+        if args.cursor:
+            params["cursor"] = args.cursor
+        if args.follow:
+            params["direction"] = "forward"
+            while True:
+                batch = client.request("GET", "/api/observability/events", params=params)
+                if not batch.get("next_cursor"):
+                    raise CLIError("Event stream returned no continuation cursor.", 3)
+                print(json.dumps({"ok": True, "data": batch}, ensure_ascii=True) if getattr(args, "json", False)
+                      else json.dumps(batch, indent=2, ensure_ascii=True), flush=True)
+                params["cursor"] = batch["next_cursor"]
+                if not batch.get("has_more"):
+                    time.sleep(1)
+        return client.request("GET", "/api/observability/events", params=params)
     if getattr(args, "role", "primary") == "embeddings":
         client = RoleClient(client, "embeddings")
     command = args.command

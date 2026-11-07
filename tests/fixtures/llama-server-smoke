@@ -45,6 +45,7 @@ emit("common_init: fitting params to device memory ...\n"
                "load_tensors: layer 3 assigned to device CPU, is_swa = 0\n"
                "load_tensors: CPU model buffer size = 1.00 MiB\n"
                "server is listening\n"
+               "update_slots: all slots are idle\n"
                "que start_loop: waiting for new tasks\n")
 
 
@@ -86,6 +87,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b'data: {"choices":[{"index":0,"delta":{"content":"response"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
         else:
             self.wfile.write(b'{"choices":[{"message":{"content":"smoke response"}}]}')
+        emit("slot release: id 0 | task 1 | stop processing\n"
+             "update_slots: all slots are idle\n")
 
 
 def stop(*_):
