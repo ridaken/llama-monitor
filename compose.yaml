@@ -6,6 +6,7 @@ services:
         LLAMA_CPP_IMAGE: ${LLAMA_CPP_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     environment:
       MONITOR_EMBEDDING_PUBLISHED_PORT: ${EMBEDDING_PORT:-8081}
+      MONITOR_MODELS_HOST_PATH: ${MODELS_DIR:-./models}
     init: true
     restart: unless-stopped
     stop_grace_period: 30s

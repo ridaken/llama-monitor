@@ -36,6 +36,7 @@ def test_data_directory_is_configurable_without_changing_native_default(tmp_path
 
 
 def test_container_starts_without_model_and_clears_stale_pid(container, monkeypatch):
+    monkeypatch.setenv("MONITOR_MODELS_HOST_PATH", "/home/tom/models")
     store.set_running({"pid": 123, "config": {"model_path": "old.gguf"}})
     monkeypatch.setattr(launcher.ServerManager, "adopt", lambda self: pytest.fail("must not adopt"))
     monkeypatch.setattr(app_module.GamingCoordinator, "start", lambda self: pytest.fail("no Windows startup"))
@@ -46,7 +47,7 @@ def test_container_starts_without_model_and_clears_stale_pid(container, monkeypa
         state = client.get("/api/launcher/state").json()
         assert state["status"]["state"] == "stopped"
         assert state["settings"]["models_dir"] == "/models"
-        assert state["runtime"] == {"containerized": True, "models_dir": "/models", "managed_port": 8001, "embedding_port": 8081, "embedding_published_port": 8081}
+        assert state["runtime"] == {"containerized": True, "models_dir": "/models", "models_host_path": "/home/tom/models", "managed_port": 8001, "embedding_port": 8081, "embedding_published_port": 8081}
         assert store.get_running() is None
     assert stopped == ["container_shutdown", "container_shutdown"]
 

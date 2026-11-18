@@ -215,6 +215,7 @@ export type ConsoleEntry = {
 export type RuntimeInfo = {
   containerized: boolean
   models_dir: string | null
+  models_host_path?: string | null
   managed_port: number | null
   embedding_port?: number | null
   embedding_published_port?: number | null

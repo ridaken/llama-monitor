@@ -88,6 +88,7 @@ def main():
             ]:
                 config = json.loads(run("config", "--format", "json", capture=True,
                     environment={**env, "BIND_ADDRESS": bind, "PROXY_BIND_ADDRESS": proxy_bind}))
+                assert config["services"]["monitor"]["environment"]["MONITOR_MODELS_HOST_PATH"] == env["MODELS_DIR"]
                 ports = {port["target"]: port["host_ip"] for port in config["services"]["monitor"]["ports"]}
                 assert ports == {8500: bind or "0.0.0.0", 8001: bind or "0.0.0.0", 8081: bind or "0.0.0.0", 8501: expected}, ports
             example_env = {key: value for key, value in env.items()
@@ -115,6 +116,11 @@ def main():
             assert exec_python("import os; print(os.getuid())") == "10001"
             state = request("/api/launcher/state")
             assert state["binary_valid"] and state["status"]["state"] == "stopped"
+            host_path = state["runtime"]["models_host_path"]
+            if os.name == "nt":
+                assert Path(host_path) == Path(directory), host_path
+            else:
+                assert host_path == str(Path(directory).resolve()), host_path
             bundled = state["settings"]["llama_server_path"]
             assert request("/api/launcher/flags")["source"] == "help"
             assert "/models/smoke.gguf" in request("/api/browse?path=/models&ext=.gguf")["files"]
