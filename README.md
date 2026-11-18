@@ -123,6 +123,12 @@ becomes `/models/controller/model.gguf`; use the same mapping for a `--mmproj`
 flag's value. `\\wsl.localhost\Ubuntu\home\tom` is a Windows File Explorer address,
 not a path inside Docker. The picker's **Location** field accepts pasted folder
 or file paths, and **Mounted models (/models)** returns to the mounted folder.
+The picker and Manage page show **Host folder for /models**, the absolute source
+of the mount (for example `/home/tom/models`). Compose captures this value when
+creating the container, so editing `.env` alone does not change the displayed
+folder. Recreate the container with `docker compose up -d` to apply a new mount.
+Use an absolute `MODELS_DIR` to display the host folder; relative paths and
+containers created without this metadata show it as unavailable.
 
 The dashboard is also available at `http://<host-LAN-IP>:8500`, and the managed
 server's OpenAI-compatible API at `http://<host-LAN-IP>:8001/v1`. After enabling

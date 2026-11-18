@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Gaming } from '@/components/Gaming'
 import { Startup } from '@/components/Startup'
 import { ProxySettings } from '@/components/ProxySettings'
-import { LauncherFeedback } from '@/components/Launcher'
+import { LauncherFeedback, ModelsMount } from '@/components/Launcher'
 import type { LauncherController } from '@/hooks/useLauncher'
 
 export function Manage({ launcher }: { launcher: LauncherController }) {
@@ -25,11 +25,14 @@ export function Manage({ launcher }: { launcher: LauncherController }) {
         </CardHeader>
         <CardContent className="manage-panel-content">
           {state?.runtime?.containerized && (
-            <p className="mb-3 text-sm text-muted-foreground">
-              Docker includes llama-server. Browse models under /models; host
-              paths and Windows executables are unavailable inside the
-              container.
-            </p>
+            <div className="mb-3 space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Docker includes llama-server. Browse models under /models; host
+                paths and Windows executables are unavailable inside the
+                container.
+              </p>
+              <ModelsMount runtime={state.runtime} />
+            </div>
           )}
           <p
             id="lx-bin-path"

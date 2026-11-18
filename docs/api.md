@@ -81,7 +81,7 @@ gaming while stale model/inference fields are removed.
 | `sysmem` | `ok`, optional `error`; when available, `total`, `used`, `available`, `percent`, `llama_rss`. RSS sums discovered llama processes; it is not a model-weight allocation measure. Docker reports RAM visible to its Linux environment. |
 | `split`, `split_source`, `split_log_configured` | Memory entries `{label, bytes, kind, gpu_index?}`. Source is `nvml`, `log`, `nvml-delta`, or null. Logged buffer sizes are allocations, not residency; deltas are estimates affected by other processes. Docker avoids matching host NVML PIDs to container PIDs. |
 | `layer_placement` | `status`, `reason`, `devices`; complete maps can add `total_layers`, `output_device`. Device entries have `label`, `layers`, optional `name`, `identity`, `gpu_index`. Status: `available`, `shared`, `loading`, `no_model`, `unavailable`. Main-model assignments exclude draft/projector layers and provisional memory-fit trials. |
-| `runtime` | `{containerized, models_dir, managed_port}`. Container values are true, `/models`, 8001; native values are false, null, null. |
+| `runtime` | `{containerized, models_dir, models_host_path, managed_port}`. Container values are true, `/models`, the mount's absolute host folder, 8001; native values are false, null, null, null. Compose snapshots `MODELS_DIR` into `MONITOR_MODELS_HOST_PATH` when creating the container; `models_host_path` is null if that value is missing or relative. |
 | `gaming` | Public switching state described below; no credentials or captured raw invocations. |
 
 ## Launcher and verification

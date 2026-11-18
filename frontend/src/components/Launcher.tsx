@@ -39,6 +39,19 @@ import {
 import { basename } from '@/lib/utils'
 import type { LauncherController } from '@/hooks/useLauncher'
 import { TestPrompt } from '@/components/TestPrompt'
+import type { RuntimeInfo } from '@/types'
+
+export function ModelsMount({ runtime }: { runtime?: RuntimeInfo }) {
+  if (!runtime?.containerized) return null
+  return (
+    <dl className="space-y-1 text-sm text-muted-foreground">
+      <dt>Host folder for /models</dt>
+      <dd className="mono select-text break-all text-foreground">
+        {runtime.models_host_path || 'Unavailable for this container'}
+      </dd>
+    </dl>
+  )
+}
 
 export function LauncherFeedback({
   launcher,
@@ -836,6 +849,7 @@ export function LauncherDialogs({
                 : 'Enter a folder or file path on the computer running llama-monitor.'}
             </DialogDescription>
           </DialogHeader>
+          <ModelsMount runtime={launcher.state?.runtime} />
           <form
             className="space-y-2"
             onSubmit={(event) => {
